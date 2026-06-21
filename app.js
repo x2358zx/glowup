@@ -311,12 +311,13 @@ function showSyncToast(message) {
 
 function updateOnlineStatusUI() {
     const badge = document.getElementById('network-status');
+    if (!badge) return;
     if (navigator.onLine) {
-        badge.className = 'badge-status online';
-        badge.innerHTML = '<span class="status-dot"></span>連線中';
+        badge.className = 'network-dot online';
+        badge.title = '雲端已連線';
     } else {
-        badge.className = 'badge-status offline';
-        badge.innerHTML = '<span class="status-dot"></span>離線 (地下室模式)';
+        badge.className = 'network-dot offline';
+        badge.title = '離線 (地下室健身房模式)';
     }
 }
 
@@ -520,12 +521,15 @@ async function updateLogSet(logId, setIndex, field, value) {
     } else if (field === 'reps') {
         set.reps = parseInt(value) || 0;
     } else if (field === 'weight') {
-        // 重點邏輯：如果當前單位是 lb，需要將輸入的 lb 轉換成 kg 存入資料庫
-        let valKg = parseFloat(value) || 0;
-        if (currentUnit === 'lb') {
-            valKg = valKg / 2.20462;
+        const displayVal = parseFloat(value) || 0;
+        set.weight_display = displayVal;
+        
+        const unit = set.weight_unit || 'kg';
+        if (unit === 'lb') {
+            set.weight_kg = displayVal / 2.20462;
+        } else {
+            set.weight_kg = displayVal;
         }
-        set.weight_kg = valKg;
     }
 
     // 檢查是否此動作所有組數均已勾選完成
@@ -541,18 +545,48 @@ async function updateLogSet(logId, setIndex, field, value) {
     syncOfflineData();
 }
 
+async function toggleSetUnit(logId, setIndex) {
+    const log = activeLogs.find(l => l.id === logId);
+    if (!log) return;
+
+    const set = log.sets.find(s => s.set_index === setIndex);
+    if (!set) return;
+
+    const oldUnit = set.weight_unit || 'kg';
+    const newUnit = oldUnit === 'kg' ? 'lb' : 'kg';
+    set.weight_unit = newUnit;
+
+    // 依據新單位換算顯示重量
+    if (newUnit === 'lb') {
+        set.weight_display = Math.round(set.weight_kg * 2.20462 * 10) / 10;
+    } else {
+        set.weight_display = Math.round(set.weight_kg * 10) / 10;
+    }
+
+    log.updated_at = new Date().toISOString();
+    log.synced = false;
+
+    await saveActiveLogToIndexedDB(log);
+    syncOfflineData();
+    
+    triggerHapticFeedback();
+    loadWorkouts();
+}
+
 async function addSetToExercise(logId) {
     const log = activeLogs.find(l => l.id === logId);
     if (!log) return;
 
     const nextIndex = log.sets.length + 1;
     // 複製最後一組的數據作為預設值
-    const lastSet = log.sets[log.sets.length - 1] || { reps: 10, weight_kg: 40 };
+    const lastSet = log.sets[log.sets.length - 1] || { reps: 10, weight_kg: 40, weight_display: 40, weight_unit: 'kg' };
     
     log.sets.push({
         set_index: nextIndex,
         reps: lastSet.reps,
         weight_kg: lastSet.weight_kg,
+        weight_display: lastSet.weight_display !== undefined ? lastSet.weight_display : lastSet.weight_kg,
+        weight_unit: lastSet.weight_unit || 'kg',
         completed: false
     });
     log.status = 'pending';
@@ -655,6 +689,10 @@ async function switchAccount(accountId) {
     
     const claimSection = document.getElementById('claim-workout-section');
     if (claimSection) claimSection.style.display = 'none';
+
+    // 同步雲端 Profile 並更新導覽列
+    await syncUserProfile();
+    updateNavigationUI();
 
     // 更新設定頁面的 UI 顯示
     renderSettingsPage();
@@ -779,15 +817,8 @@ async function addCustomExercise(exerciseId) {
 // 7. 公斤 (KG) / 磅 (LB) 前端動態換算
 // ==========================================
 
-function toggleUnit() {
-    currentUnit = currentUnit === 'kg' ? 'lb' : 'kg';
-    localStorage.setItem('glowup_unit', currentUnit);
-    document.getElementById('toggle-unit-indicator').textContent = currentUnit.toUpperCase();
-    loadWorkouts(); // 重新渲染列表以更新數值顯示
-}
-
-function formatWeightDisplay(weightKg) {
-    if (currentUnit === 'lb') {
+function formatWeightDisplay(weightKg, unit = 'kg') {
+    if (unit === 'lb') {
         const lbVal = weightKg * 2.20462;
         return Math.round(lbVal * 10) / 10; // 保留一位小數
     }
@@ -873,7 +904,7 @@ function render1RMChart(exerciseId, dataPoints) {
         data: {
             labels: labels,
             datasets: [{
-                label: `預估 1RM (${currentUnit.toUpperCase()})`,
+                label: `預估 1RM (KG)`,
                 data: values,
                 borderColor: '#6366f1',
                 backgroundColor: 'rgba(99, 102, 241, 0.1)',
@@ -1418,7 +1449,7 @@ function switchTab(tabId) {
     });
     
     const activePage = document.getElementById(`${tabId}-page`);
-    activePage.classList.add('active');
+    if (activePage) activePage.classList.add('active');
 
     // 切換分頁載入特定邏輯
     if (tabId === 'workout') {
@@ -1428,6 +1459,9 @@ function switchTab(tabId) {
         loadHistoryLogs();
     } else if (tabId === 'settings') {
         renderSettingsPage();
+    } else if (tabId === 'exercises') {
+        loadExerciseLibrary();
+        loadGroupStudents();
     }
 }
 
@@ -1510,34 +1544,58 @@ async function loadDemoMockData() {
 
 // 渲染設定分頁 UI
 function renderSettingsPage() {
-    document.getElementById('set-email').value = currentUser.email;
-    document.getElementById('set-name').value = currentUser.name;
-    document.getElementById('set-role').value = currentUser.role;
-    document.getElementById('set-group-id').value = currentUser.groupId;
+    const emailEl = document.getElementById('set-email');
+    const nameEl = document.getElementById('set-name');
+    const roleEl = document.getElementById('set-role');
     
-    document.getElementById('set-supabase-url').value = localStorage.getItem('glowup_supabase_url') || '';
-    document.getElementById('set-supabase-key').value = localStorage.getItem('glowup_supabase_key') || '';
+    if (emailEl) emailEl.value = currentUser.email || '';
+    if (nameEl) nameEl.value = currentUser.name || '';
+    if (roleEl) roleEl.value = currentUser.role || 'student';
 }
 
-function saveSettings() {
-    currentUser.email = document.getElementById('set-email').value;
-    currentUser.name = document.getElementById('set-name').value;
+async function saveSettings() {
+    currentUser.email = document.getElementById('set-email').value.trim();
+    currentUser.name = document.getElementById('set-name').value.trim();
     currentUser.role = document.getElementById('set-role').value;
-    currentUser.groupId = document.getElementById('set-group-id').value;
 
     localStorage.setItem('glowup_email', currentUser.email);
     localStorage.setItem('glowup_name', currentUser.name);
     localStorage.setItem('glowup_role', currentUser.role);
-    localStorage.setItem('glowup_group_id', currentUser.groupId);
 
-    const supUrl = document.getElementById('set-supabase-url').value;
-    const supKey = document.getElementById('set-supabase-key').value;
+    // 儲存並在線同步至 Supabase
+    if (navigator.onLine && supabaseClient && currentUser.email) {
+        try {
+            const { data: existingProfile } = await supabaseClient
+                .from('profiles')
+                .select('*')
+                .eq('email', currentUser.email)
+                .maybeSingle();
 
-    localStorage.setItem('glowup_supabase_url', supUrl);
-    localStorage.setItem('glowup_supabase_key', supKey);
+            const profilePayload = {
+                email: currentUser.email,
+                name: currentUser.name,
+                role: currentUser.role,
+                group_id: currentUser.groupId || null
+            };
 
-    initSupabase();
-    showSyncToast('💾 個人與 API 設定已儲存成功！');
+            if (existingProfile) {
+                profilePayload.id = existingProfile.id;
+            } else {
+                profilePayload.id = crypto.randomUUID();
+            }
+
+            const { error } = await supabaseClient
+                .from('profiles')
+                .upsert(profilePayload);
+
+            if (error) throw error;
+        } catch (e) {
+            console.warn('[Profiles Sync] 無法將個人設定同步至雲端:', e);
+        }
+    }
+
+    showSyncToast('💾 個人設定已儲存成功！');
+    updateNavigationUI();
     loadWorkouts();
 }
 
@@ -1602,18 +1660,33 @@ async function renderWorkoutPage() {
         let setRowsHtml = '';
         log.sets.forEach(set => {
             const completedClass = set.completed ? 'completed' : '';
-            const weightVal = formatWeightDisplay(set.weight_kg);
+            const weightUnit = set.weight_unit || 'kg';
+            
+            let weightVal;
+            if (set.weight_display !== undefined) {
+                weightVal = set.weight_display;
+            } else {
+                weightVal = formatWeightDisplay(set.weight_kg, weightUnit);
+            }
+            
+            // 格式化至小數後一位
+            weightVal = Math.round(weightVal * 10) / 10;
             
             setRowsHtml += `
                 <div class="set-row ${completedClass}">
                     <div class="set-number">${set.set_index}</div>
                     
-                    <!-- 重量增減 -->
+                    <!-- 重量增減與單組單位切換 -->
                     <div class="number-stepper">
                         <button class="stepper-btn" onclick="adjustStepperValue('${log.id}', ${set.set_index}, 'weight', -2.5)">-</button>
-                        <input type="number" step="0.1" class="stepper-input" 
-                               value="${weightVal}" 
-                               onchange="updateLogSet('${log.id}', ${set.set_index}, 'weight', this.value)">
+                        <div class="input-unit-wrapper">
+                            <input type="number" step="0.1" class="stepper-input" 
+                                   value="${weightVal}" 
+                                   onchange="updateLogSet('${log.id}', ${set.set_index}, 'weight', this.value)">
+                            <button class="unit-badge-btn ${weightUnit}" onclick="toggleSetUnit('${log.id}', ${set.set_index})" title="點擊切換 KG/LB">
+                                ${weightUnit.toUpperCase()}
+                            </button>
+                        </div>
                         <button class="stepper-btn" onclick="adjustStepperValue('${log.id}', ${set.set_index}, 'weight', 2.5)">+</button>
                     </div>
 
@@ -1686,7 +1759,7 @@ async function renderWorkoutPage() {
             <!-- 組數清單 -->
             <div class="sets-header">
                 <div>組</div>
-                <div>重量 (${currentUnit.toUpperCase()})</div>
+                <div>重量</div>
                 <div>次數</div>
                 <div>完成</div>
                 <div>刪除</div>
@@ -1747,18 +1820,12 @@ function adjustStepperValue(logId, setIndex, field, delta) {
     if (!set) return;
 
     if (field === 'weight') {
-        // 智慧重量調整：KG 步進 2.5kg，LB 步進 5lb
-        let step = delta;
-        if (currentUnit === 'lb') {
-            step = delta > 0 ? 5 : -5;
-        } else {
-            step = delta > 0 ? 2.5 : -2.5;
-        }
+        const unit = set.weight_unit || 'kg';
+        const step = unit === 'lb' ? (delta > 0 ? 5 : -5) : (delta > 0 ? 2.5 : -2.5);
 
-        let currentWeightDisplay = formatWeightDisplay(set.weight_kg);
+        let currentWeightDisplay = set.weight_display !== undefined ? set.weight_display : formatWeightDisplay(set.weight_kg, unit);
         let newWeightDisplay = Math.max(0, currentWeightDisplay + step);
         
-        // 寫入
         updateLogSet(logId, setIndex, 'weight', newWeightDisplay);
     } else if (field === 'reps') {
         let newReps = Math.max(0, set.reps + delta);
@@ -1766,8 +1833,6 @@ function adjustStepperValue(logId, setIndex, field, delta) {
     }
 
     triggerHapticFeedback();
-
-    // 重新繪製 UI
     loadWorkouts();
 }
 
@@ -1803,12 +1868,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         loadWorkouts();
     });
 
-    // KG/LB 開關監聽
-    const unitToggle = document.getElementById('unit-toggle-cb');
-    unitToggle.checked = currentUnit === 'lb';
-    document.getElementById('toggle-unit-indicator').textContent = currentUnit.toUpperCase();
-    unitToggle.addEventListener('change', toggleUnit);
-
     // 關閉 Modal 點擊事件
     document.querySelectorAll('.modal-close').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1829,6 +1888,198 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    // F. 同步個人設定檔與更新導覽列
+    await syncUserProfile();
+    updateNavigationUI();
+
     // 預設加載今日課表
     loadWorkouts();
 });
+
+// ==========================================
+// 14. 教練端動作/群組拉人管理後台業務邏輯
+// ==========================================
+
+function clearLibraryExerciseForm() {
+    document.getElementById('lib-ex-id').value = '';
+    document.getElementById('lib-ex-name').value = '';
+    document.getElementById('lib-ex-url').value = '';
+    document.getElementById('lib-ex-category').value = '腿部';
+    showSyncToast('已清空欄位，可輸入新動作！');
+}
+
+async function inviteStudentToGroup() {
+    const emailInput = document.getElementById('coach-invite-email');
+    if (!emailInput) return;
+    const email = emailInput.value.trim().toLowerCase();
+    
+    if (!email) {
+        alert('請輸入學員 Email！');
+        return;
+    }
+
+    if (!currentUser.groupId) {
+        alert('教練無效的群組 ID，請重新整理或設定群組！');
+        return;
+    }
+
+    showSyncToast(`正在拉入學員 ${email}...`);
+
+    if (navigator.onLine && supabaseClient) {
+        try {
+            // 1. 查找該 email 的學員 Profile
+            const { data: profile, error: findErr } = await supabaseClient
+                .from('profiles')
+                .select('*')
+                .eq('email', email)
+                .maybeSingle();
+
+            if (findErr) throw findErr;
+
+            if (!profile) {
+                // 若不存在，自動插入一個 placeholder profile
+                const newProfile = {
+                    id: crypto.randomUUID(),
+                    email: email,
+                    name: '新學員',
+                    role: 'student',
+                    group_id: currentUser.groupId
+                };
+                const { error: insErr } = await supabaseClient
+                    .from('profiles')
+                    .insert(newProfile);
+                
+                if (insErr) throw insErr;
+                showSyncToast(`已為未註冊學員 ${email} 建立帳號並成功拉入群組！`);
+            } else {
+                // 若已存在，更新其 group_id
+                const { error: updErr } = await supabaseClient
+                    .from('profiles')
+                    .update({ group_id: currentUser.groupId })
+                    .eq('email', email);
+                
+                if (updErr) throw updErr;
+                showSyncToast(`成功將學員 ${profile.name} (${email}) 拉入您的群組！`);
+            }
+
+            emailInput.value = '';
+            loadGroupStudents();
+        } catch (e) {
+            console.error('[Invite] 邀請失敗:', e);
+            alert('拉入學員失敗：' + e.message);
+        }
+    } else {
+        alert('請在「連線狀態」下進行學員拉人操作！');
+    }
+}
+
+async function loadGroupStudents() {
+    const list = document.getElementById('coach-student-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    if (navigator.onLine && supabaseClient && currentUser.groupId) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('profiles')
+                .select('*')
+                .eq('group_id', currentUser.groupId)
+                .eq('role', 'student');
+
+            if (error) throw error;
+
+            if (!data || data.length === 0) {
+                list.innerHTML = '<div style="text-align:center; color:var(--text-muted); font-size:0.85rem; padding:1rem;">群組內暫無學員</div>';
+                return;
+            }
+
+            data.forEach(student => {
+                const div = document.createElement('div');
+                div.style = 'display:flex; justify-content:space-between; align-items:center; padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.03); font-size:0.85rem;';
+                div.innerHTML = `
+                    <span>👤 <strong>${student.name}</strong> (${student.email})</span>
+                    <button class="btn btn-danger" style="font-size:0.7rem; padding:0.25rem 0.5rem;" onclick="removeStudentFromGroup('${student.id}')">移除</button>
+                `;
+                list.appendChild(div);
+            });
+        } catch (e) {
+            list.innerHTML = '<div style="text-align:center; color:var(--text-muted); font-size:0.85rem; padding:1rem;">載入學員名單失敗</div>';
+        }
+    } else {
+        list.innerHTML = '<div style="text-align:center; color:var(--text-muted); font-size:0.85rem; padding:1rem;">離線狀態，無法載入學員列表</div>';
+    }
+}
+
+async function removeStudentFromGroup(studentId) {
+    if (!confirm('確定要將該學員從群組中移除嗎？')) return;
+
+    if (navigator.onLine && supabaseClient) {
+        try {
+            const { error } = await supabaseClient
+                .from('profiles')
+                .update({ group_id: null })
+                .eq('id', studentId);
+
+            if (error) throw error;
+            showSyncToast('已成功將學員移出群組！');
+            loadGroupStudents();
+        } catch (e) {
+            alert('移除失敗：' + e.message);
+        }
+    } else {
+        alert('請在「連線狀態」下進行此操作！');
+    }
+}
+
+function updateNavigationUI() {
+    const navWorkout = document.getElementById('nav-workout');
+    const navExercises = document.getElementById('nav-exercises');
+    
+    if (currentUser.role === 'coach') {
+        if (navWorkout) {
+            navWorkout.querySelector('.nav-icon').textContent = '📋';
+            navWorkout.querySelector('.nav-label').textContent = '課表發布';
+        }
+        if (navExercises) {
+            navExercises.style.display = 'flex';
+        }
+    } else {
+        if (navWorkout) {
+            navWorkout.querySelector('.nav-icon').textContent = '🏋️‍♂️';
+            navWorkout.querySelector('.nav-label').textContent = '今日訓練';
+        }
+        if (navExercises) {
+            navExercises.style.display = 'none';
+        }
+        
+        const exercisesPage = document.getElementById('exercises-page');
+        if (exercisesPage && exercisesPage.classList.contains('active')) {
+            switchTab('workout');
+        }
+    }
+}
+
+async function syncUserProfile() {
+    if (navigator.onLine && supabaseClient && currentUser.email) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('profiles')
+                .select('*')
+                .eq('email', currentUser.email)
+                .maybeSingle();
+            
+            if (!error && data) {
+                currentUser.name = data.name;
+                currentUser.role = data.role;
+                currentUser.groupId = data.group_id;
+                
+                localStorage.setItem('glowup_name', currentUser.name);
+                localStorage.setItem('glowup_role', currentUser.role);
+                localStorage.setItem('glowup_group_id', currentUser.groupId || '');
+                console.log('[Profile Sync] 用戶 Profile 已從雲端同步:', data);
+            }
+        } catch (e) {
+            console.warn('[Profile Sync] 同步設定檔失敗:', e);
+        }
+    }
+}

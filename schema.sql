@@ -132,15 +132,15 @@ create policy "允許教練管理（增刪改）群組" on public.groups
     );
 
 -- 2. Profiles 政策
-create policy "允許同群組成員及教練讀取使用者設定檔" on public.profiles
+create policy "允許所有人讀取設定檔以進行群組拉人" on public.profiles
     for select using (
-        group_id = public.get_my_group_id() or
-        public.is_group_coach(group_id)
+        true
     );
 
-create policy "允許用戶更新自己的設定檔" on public.profiles
+create policy "允許用戶與教練更新設定檔" on public.profiles
     for update using (
-        id = auth.uid()
+        id = auth.uid() or
+        (select role from public.profiles where id = auth.uid()) = 'coach'
     );
 
 -- 3. Master Workouts 政策
