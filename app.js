@@ -47,6 +47,161 @@ let activeLogs = [];
 let masterWorkouts = [];
 let chartInstance = null; // 儲存 1RM Chart.js 實例
 
+// --- 休息計時器狀態 ---
+let restTimerInterval = null;
+let restTimeRemaining = 90;
+
+// --- 解鎖密碼鎖功能 ---
+function checkGatePassword() {
+    const pwdInput = document.getElementById('gate-password-input');
+    const errorMsg = document.getElementById('gate-error-msg');
+    if (!pwdInput) return;
+    if (pwdInput.value === '666') {
+        localStorage.setItem('glowup_unlocked', 'true');
+        const gate = document.getElementById('password-gate');
+        if (gate) {
+            gate.classList.remove('active');
+            setTimeout(() => {
+                gate.style.display = 'none';
+            }, 300);
+        }
+        if (errorMsg) errorMsg.style.display = 'none';
+    } else {
+        if (errorMsg) {
+            errorMsg.style.display = 'block';
+            pwdInput.value = '';
+            pwdInput.focus();
+        }
+    }
+}
+
+// --- 休息計時器控制 ---
+function startRestTimer() {
+    clearInterval(restTimerInterval);
+    const timerOverlay = document.getElementById('rest-timer-overlay');
+    const timerDisplay = document.getElementById('timer-display');
+    if (!timerOverlay || !timerDisplay) return;
+    
+    restTimeRemaining = 90;
+    timerDisplay.textContent = `${restTimeRemaining} 秒`;
+    timerOverlay.classList.remove('blink');
+    timerOverlay.classList.add('active');
+    
+    restTimerInterval = setInterval(() => {
+        restTimeRemaining--;
+        if (restTimeRemaining > 0) {
+            timerDisplay.textContent = `${restTimeRemaining} 秒`;
+        } else {
+            timerDisplay.textContent = `0 秒！開始做組！`;
+            timerOverlay.classList.add('blink');
+            triggerHapticFeedback();
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            clearInterval(restTimerInterval);
+        }
+    }, 1000);
+}
+
+function adjustTimer(seconds) {
+    restTimeRemaining = Math.max(0, restTimeRemaining + seconds);
+    const timerDisplay = document.getElementById('timer-display');
+    if (timerDisplay) {
+        timerDisplay.textContent = `${restTimeRemaining} 秒`;
+    }
+    const timerOverlay = document.getElementById('rest-timer-overlay');
+    if (restTimeRemaining > 0) {
+        if (timerOverlay) timerOverlay.classList.remove('blink');
+        if (!restTimerInterval || restTimeRemaining === seconds) {
+            clearInterval(restTimerInterval);
+            restTimerInterval = setInterval(() => {
+                restTimeRemaining--;
+                if (restTimeRemaining > 0) {
+                    timerDisplay.textContent = `${restTimeRemaining} 秒`;
+                } else {
+                    timerDisplay.textContent = `0 秒！開始做組！`;
+                    if (timerOverlay) timerOverlay.classList.add('blink');
+                    triggerHapticFeedback();
+                    if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                    clearInterval(restTimerInterval);
+                }
+            }, 1000);
+        }
+    }
+}
+
+function stopTimer() {
+    clearInterval(restTimerInterval);
+    restTimerInterval = null;
+    const timerOverlay = document.getElementById('rest-timer-overlay');
+    if (timerOverlay) {
+        timerOverlay.classList.remove('active');
+        timerOverlay.classList.remove('blink');
+    }
+}
+
+// --- 複製上一組重量與次數快捷功能 ---
+async function clonePrevSet(logId, setIndex) {
+    const log = activeLogs.find(l => l.id === logId);
+    if (!log) return;
+    
+    const prevSet = log.sets.find(s => s.set_index === setIndex - 1);
+    const currentSet = log.sets.find(s => s.set_index === setIndex);
+    if (!prevSet || !currentSet) return;
+    
+    currentSet.weight_kg = prevSet.weight_kg;
+    currentSet.weight_display = prevSet.weight_display;
+    currentSet.weight_unit = prevSet.weight_unit || 'kg';
+    currentSet.reps = prevSet.reps;
+    currentSet.completed = true;
+    
+    log.status = log.sets.every(s => s.completed) ? 'completed' : 'pending';
+    log.updated_at = new Date().toISOString();
+    log.synced = false;
+    
+    await saveActiveLogToIndexedDB(log);
+    syncOfflineData();
+    
+    triggerHapticFeedback();
+    loadWorkouts();
+    
+    startRestTimer();
+}
+
+// --- 更新學生個人備註 ---
+async function updateStudentNotes(logId, value) {
+    const log = activeLogs.find(l => l.id === logId);
+    if (!log) return;
+    
+    log.student_notes = value;
+    log.updated_at = new Date().toISOString();
+    log.synced = false;
+    
+    await saveActiveLogToIndexedDB(log);
+    syncOfflineData();
+    showSyncToast('📝 個人備註已儲存');
+}
+
+// --- 獲取該動作上一次完成的紀錄 ---
+async function getLastCompletedLog(email, exerciseId) {
+    if (!db) return null;
+    return new Promise((resolve) => {
+        const transaction = db.transaction(['student_active_logs'], 'readonly');
+        const store = transaction.objectStore('student_active_logs');
+        const request = store.getAll();
+        
+        request.onsuccess = function() {
+            const all = request.result;
+            const completedLogs = all
+                .filter(log => log.student_email === email && 
+                               (log.exercise_id === exerciseId || log.swapped_exercise_id === exerciseId) &&
+                               log.status === 'completed')
+                .sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            resolve(completedLogs.length > 0 ? completedLogs[0] : null);
+        };
+        request.onerror = () => resolve(null);
+    });
+}
+
 // --- 預設動作媒體資料庫 (Demo 影音檔案) ---
 const EXERCISE_MEDIA_DATABASE = {
     'EX_SQUAT_01': {
@@ -313,10 +468,12 @@ function updateOnlineStatusUI() {
     const badge = document.getElementById('network-status');
     if (!badge) return;
     if (navigator.onLine) {
-        badge.className = 'network-dot online';
+        badge.className = 'network-pill online';
+        badge.innerHTML = '<span class="status-dot"></span>Online';
         badge.title = '雲端已連線';
     } else {
-        badge.className = 'network-dot offline';
+        badge.className = 'network-pill offline';
+        badge.innerHTML = '<span class="status-dot"></span>Offline';
         badge.title = '離線 (地下室健身房模式)';
     }
 }
@@ -459,8 +616,13 @@ async function loadWorkouts() {
 }
 
 async function claimWorkout() {
+    if (activeLogs.length > 0) {
+        alert('您今日已領取過課表，請直接開始訓練！');
+        return;
+    }
+
     if (masterWorkouts.length === 0) {
-        alert('今日教練尚未發布主課表模板！');
+        alert('今日教練尚未為您的群組發布任何課表，無法領取！');
         return;
     }
 
@@ -472,13 +634,15 @@ async function claimWorkout() {
 
     // 將教練發布的每一項動作複製成學生專屬紀錄
     for (const master of masterWorkouts) {
-        // 預設建立 target_sets 個組數結構
+        // 預設建立 target_sets 個組數結構，初始數值為 null 以顯示歷史 placeholder
         const defaultSets = [];
         for (let i = 1; i <= master.target_sets; i++) {
             defaultSets.push({
                 set_index: i,
-                reps: 10,
-                weight_kg: 40,
+                reps: null,
+                weight_kg: null,
+                weight_display: null,
+                weight_unit: 'kg',
                 completed: false
             });
         }
@@ -496,6 +660,7 @@ async function claimWorkout() {
             status: 'pending',
             swapped_exercise_id: null,
             swapped_exercise_name: null,
+            student_notes: null, // 初始個人備註為空
             updated_at: new Date().toISOString(),
             synced: false // 標記為尚未同步至雲端
         };
@@ -518,6 +683,9 @@ async function updateLogSet(logId, setIndex, field, value) {
 
     if (field === 'completed') {
         set.completed = value;
+        if (value === true) {
+            startRestTimer();
+        }
     } else if (field === 'reps') {
         set.reps = parseInt(value) || 0;
     } else if (field === 'weight') {
@@ -1114,6 +1282,140 @@ function loadHistoryLogs() {
 // 10. 教練主課表 console 功能 (Coach View)
 // ==========================================
 
+// --- 教練聯動下拉選單與預覽功能 ---
+function onCoachCategoryChange() {
+    const categorySelect = document.getElementById('coach-category-select');
+    const exerciseSelect = document.getElementById('coach-exercise-select');
+    if (!categorySelect || !exerciseSelect) return;
+    
+    const selectedCategory = categorySelect.value;
+    exerciseSelect.innerHTML = '';
+    
+    let matched = 0;
+    Object.entries(exerciseLibrary).forEach(([exId, details]) => {
+        if (details.category === selectedCategory) {
+            const option = document.createElement('option');
+            option.value = exId;
+            option.textContent = details.name;
+            exerciseSelect.appendChild(option);
+            matched++;
+        }
+    });
+    
+    if (matched === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '（該分類尚無動作範本）';
+        exerciseSelect.appendChild(option);
+    }
+    
+    onCoachExerciseChange();
+}
+
+async function onCoachExerciseChange() {
+    const exerciseSelect = document.getElementById('coach-exercise-select');
+    const previewBox = document.getElementById('coach-exercise-preview-box');
+    if (!exerciseSelect || !previewBox) return;
+    
+    const exId = exerciseSelect.value;
+    if (!exId || !exerciseLibrary[exId]) {
+        previewBox.innerHTML = '<div class="preview-placeholder">選擇動作以載入影音</div>';
+        return;
+    }
+    
+    const details = exerciseLibrary[exId];
+    if (details.mediaUrl) {
+        const isCached = await checkIsMediaCached(exId);
+        previewBox.innerHTML = `
+            <div class="video-preview-wrapper" style="margin: 0; width: 100%; height: 100%;">
+                <video src="${details.mediaUrl}" controls loop muted playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+                <div class="media-cache-badge ${isCached ? 'cached' : 'uncached'} media-badge-${exId}">
+                    ${isCached ? '✓ 離線已存檔' : '⚠ 需連線下載'}
+                </div>
+            </div>
+        `;
+    } else {
+        previewBox.innerHTML = '<div class="preview-placeholder">此動作無示範影片</div>';
+    }
+}
+
+// --- 複製上週課表模板 ---
+async function copyPreviousWeekTemplate() {
+    const activeDate = new Date(selectedDate);
+    const prevWeekDate = new Date(activeDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const prevWeekDateStr = prevWeekDate.toISOString().split('T')[0];
+
+    if (!confirm(`確定要複製上週同星期 (${prevWeekDateStr}) 的課表模板到今天 (${selectedDate}) 嗎？`)) return;
+    
+    showSyncToast('⏳ 正在複製上週課表模板...');
+    
+    let prevWorkouts = [];
+    if (navigator.onLine && supabaseClient) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('master_workouts')
+                .select('*')
+                .eq('date', prevWeekDateStr)
+                .eq('group_id', currentUser.groupId);
+            if (!error && data) {
+                prevWorkouts = data;
+            }
+        } catch (e) {
+            console.warn('[Coach Template Copy] 無法從雲端獲取上週課表，改用本地快取');
+        }
+    }
+    
+    if (prevWorkouts.length === 0) {
+        prevWorkouts = await getMasterWorkoutsFromIndexedDB(prevWeekDateStr, currentUser.groupId);
+    }
+    
+    if (prevWorkouts.length === 0) {
+        alert(`找不到上週同星期 (${prevWeekDateStr}) 的課表模板！`);
+        return;
+    }
+    
+    // 複製每一個 master workout 到今日
+    const newWorkouts = [];
+    for (const prev of prevWorkouts) {
+        const newW = {
+            id: crypto.randomUUID(),
+            group_id: currentUser.groupId,
+            date: selectedDate,
+            exercise_id: prev.exercise_id,
+            exercise_name: prev.exercise_name,
+            target_sets: prev.target_sets,
+            notes: prev.notes,
+            created_at: new Date().toISOString()
+        };
+        
+        // 寫入 IndexedDB
+        const transaction = db.transaction(['master_workouts'], 'readwrite');
+        transaction.objectStore('master_workouts').put(newW);
+        await new Promise(r => transaction.oncomplete = r);
+        
+        newWorkouts.push(newW);
+    }
+    
+    // 如果在線，同步至 Supabase
+    if (navigator.onLine && supabaseClient) {
+        try {
+            const { error } = await supabaseClient
+                .from('master_workouts')
+                .insert(newWorkouts);
+            if (error) throw error;
+            showSyncToast('✅ 上週課表已成功複製並發布至雲端！');
+        } catch (e) {
+            console.error('[Coach Template Copy] 同步複製的課表至雲端失敗:', e);
+            showSyncToast('⚠ 複製成功但雲端同步失敗，連線後自動重試');
+        }
+    } else {
+        showSyncToast('✅ 已複製上週課表到本地！');
+    }
+    
+    // 重新加載課表
+    loadWorkouts();
+}
+
 async function loadCoachConsole() {
     if (currentUser.role !== 'coach') {
         document.getElementById('coach-section').style.display = 'none';
@@ -1221,8 +1523,11 @@ async function deleteMasterWorkout(id) {
 
 // --- 動作庫管理業務邏輯 ---
 function populateExerciseSelects() {
+    // 1. 初始化教練端的雙層選單
+    onCoachCategoryChange();
+
+    // 2. 初始化學員自訂與替換動作的選單 (維持全部動作列出)
     const selects = [
-        document.getElementById('coach-exercise-select'),
         document.getElementById('custom-exercise-select'),
         document.getElementById('swap-exercise-select')
     ];
@@ -1244,20 +1549,22 @@ async function addOrUpdateLibraryExercise() {
     const nameInput = document.getElementById('lib-ex-name');
     const urlInput = document.getElementById('lib-ex-url');
     const categorySelect = document.getElementById('lib-ex-category');
+    const tipsInput = document.getElementById('lib-ex-tips');
 
     let exId = idInput.value.trim().toUpperCase();
     const exName = nameInput.value.trim();
     const mediaUrl = urlInput.value.trim();
     const category = categorySelect ? categorySelect.value : '腿部';
+    const defaultTips = tipsInput ? tipsInput.value.trim() : '';
 
     if (!exName) {
         alert('請輸入動作名稱！');
         return;
     }
 
-    // 如果未輸入動作 ID，則自動產生一個以 EX_ 開頭的唯一 ID
+    // 如果未輸入動作 ID，則自動產生一個唯一的 ID (使用 crypto.randomUUID 生成以防衝突)
     if (!exId) {
-        exId = 'EX_' + Date.now().toString(36).toUpperCase();
+        exId = 'EX_' + crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase();
     }
 
     const newExercise = {
@@ -1265,6 +1572,7 @@ async function addOrUpdateLibraryExercise() {
         name: exName,
         category: category,
         media_url: mediaUrl || null,
+        default_tips: defaultTips || null,
         group_id: currentUser.groupId
     };
 
@@ -1279,8 +1587,8 @@ async function addOrUpdateLibraryExercise() {
         if (navigator.onLine && supabaseClient) {
             try {
                 const { error } = await supabaseClient
-                    .from('exercises')
-                    .upsert(newExercise);
+                     .from('exercises')
+                     .upsert(newExercise);
                 if (error) throw error;
                 showSyncToast('✅ 動作已成功發布至雲端動作庫！');
             } catch (e) {
@@ -1293,6 +1601,7 @@ async function addOrUpdateLibraryExercise() {
         idInput.value = '';
         nameInput.value = '';
         urlInput.value = '';
+        if (tipsInput) tipsInput.value = '';
         if (categorySelect) categorySelect.value = '腿部';
 
         // 重新加載並渲染
@@ -1382,7 +1691,8 @@ async function loadExerciseLibrary() {
         exerciseLibrary[ex.id] = {
             name: ex.name,
             mediaUrl: ex.media_url,
-            category: ex.category || '腿部'
+            category: ex.category || '腿部',
+            defaultTips: ex.default_tips || ''
         };
     });
 
@@ -1421,6 +1731,8 @@ function renderCoachExerciseList() {
             document.getElementById('lib-ex-id').value = exId;
             document.getElementById('lib-ex-name').value = details.name;
             document.getElementById('lib-ex-url').value = details.mediaUrl || '';
+            const tipsEl = document.getElementById('lib-ex-tips');
+            if (tipsEl) tipsEl.value = details.defaultTips || '';
             const catSelect = document.getElementById('lib-ex-category');
             if (catSelect) catSelect.value = cat;
             triggerHapticFeedback();
@@ -1465,82 +1777,7 @@ function switchTab(tabId) {
     }
 }
 
-// 載入預載體驗資料庫 (Mock Data)
-async function loadDemoMockData() {
-    showSyncToast('💡 正在生成示範體驗資料...');
-    
-    // A. 寫入模擬的主課表 (Master Workouts) - 今天
-    const today = new Date().toISOString().split('T')[0];
-    const mockMasters = [
-        {
-            id: 'mock-m-1',
-            group_id: currentUser.groupId,
-            date: today,
-            exercise_id: 'EX_SQUAT_01',
-            exercise_name: '後背蹲舉 (Back Squat)',
-            target_sets: 4,
-            notes: '地下室訓練重點：動作下蹲到大腿與地面平行，起立時呼氣',
-            created_at: new Date().toISOString()
-        },
-        {
-            id: 'mock-m-2',
-            group_id: currentUser.groupId,
-            date: today,
-            exercise_id: 'EX_BENCH_01',
-            exercise_name: '槓鈴臥推 (Bench Press)',
-            target_sets: 4,
-            notes: '控制下放速度，胸大肌充分拉伸',
-            created_at: new Date().toISOString()
-        }
-    ];
-
-    // B. 寫入模擬的主課表 (Master Workouts) - 昨天
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-    const mockMastersYesterday = [
-        {
-            id: 'mock-m-3',
-            group_id: currentUser.groupId,
-            date: yesterday,
-            exercise_id: 'EX_DEAD_01',
-            exercise_name: '硬舉 (Deadlift)',
-            target_sets: 3,
-            notes: '背部打直，足底均勻受力',
-            created_at: new Date().toISOString()
-        }
-    ];
-
-    // C. 寫入昨日學生已完成的紀錄
-    const mockYesterdayLogs = [
-        {
-            id: 'mock-l-1',
-            master_workout_id: 'mock-m-3',
-            group_id: currentUser.groupId,
-            student_email: currentUser.email,
-            date: yesterday,
-            exercise_id: 'EX_DEAD_01',
-            exercise_name: '硬舉 (Deadlift)',
-            target_sets: 3,
-            sets: [
-                { set_index: 1, reps: 10, weight_kg: 80, completed: true },
-                { set_index: 2, reps: 8, weight_kg: 90, completed: true },
-                { set_index: 3, reps: 6, weight_kg: 100, completed: true }
-            ],
-            status: 'completed',
-            swapped_exercise_id: null,
-            swapped_exercise_name: null,
-            updated_at: new Date().toISOString(),
-            synced: true
-        }
-    ];
-
-    await saveMasterWorkoutsToIndexedDB([...mockMasters, ...mockMastersYesterday]);
-    for (const log of mockYesterdayLogs) {
-        await saveActiveLogToIndexedDB(log);
-    }
-
-    showSyncToast('✅ 示範資料載入完成！今日已發布課表，請點擊「Claim Workout」體驗！');
-    loadWorkouts();
-}
+// 體驗模擬數據按鈕已於生產環境中移除
 
 // 渲染設定分頁 UI
 function renderSettingsPage() {
@@ -1642,6 +1879,8 @@ async function renderWorkoutPage() {
     listContainer.style.display = 'block';
     listContainer.innerHTML = '';
 
+    const email = currentUser.email;
+
     for (const log of activeLogs) {
         const card = document.createElement('div');
         const isCompleted = log.status === 'completed';
@@ -1652,9 +1891,37 @@ async function renderWorkoutPage() {
         const swappedBadge = log.swapped_exercise_id ? '<span class="swapped-badge">已替換</span>' : '';
         const currentExId = log.swapped_exercise_id || log.exercise_id;
         
-        // 影片資訊
-        const mediaInfo = EXERCISE_MEDIA_DATABASE[currentExId];
+        // 影片資訊與快取狀態
+        const mediaInfo = exerciseLibrary[currentExId];
         const isCached = await checkIsMediaCached(currentExId);
+
+        // 讀取該動作上一次完成的歷史紀錄 (Dual-layer history placeholders)
+        const lastCompletedLog = await getLastCompletedLog(email, currentExId);
+        
+        let lastWeight = 40;
+        let lastReps = 10;
+        let lastUnit = 'kg';
+        if (lastCompletedLog && lastCompletedLog.sets && lastCompletedLog.sets.length > 0) {
+            const firstCompletedSet = lastCompletedLog.sets.find(s => s.completed) || lastCompletedLog.sets[0];
+            lastWeight = firstCompletedSet.weight_display || firstCompletedSet.weight_kg || 40;
+            lastReps = firstCompletedSet.reps || 10;
+            lastUnit = firstCompletedSet.weight_unit || 'kg';
+        }
+        
+        const lastNotes = lastCompletedLog ? (lastCompletedLog.student_notes || '') : '';
+
+        // 雙層提示訊息 cues 區
+        const defaultTips = mediaInfo ? mediaInfo.defaultTips : '';
+        const master = masterWorkouts.find(w => w.id === log.master_workout_id);
+        const dailyNotes = master ? master.notes : '';
+
+        let cuesHtml = '';
+        if (defaultTips) {
+            cuesHtml += `<div class="exercise-cue permanent-cue">💡 動作常設提示：${defaultTips}</div>`;
+        }
+        if (dailyNotes) {
+            cuesHtml += `<div class="exercise-cue daily-cue">📋 當日訓練備註：${dailyNotes}</div>`;
+        }
 
         // 渲染組數
         let setRowsHtml = '';
@@ -1662,15 +1929,15 @@ async function renderWorkoutPage() {
             const completedClass = set.completed ? 'completed' : '';
             const weightUnit = set.weight_unit || 'kg';
             
-            let weightVal;
-            if (set.weight_display !== undefined) {
-                weightVal = set.weight_display;
-            } else {
-                weightVal = formatWeightDisplay(set.weight_kg, weightUnit);
+            let weightVal = '';
+            if (set.weight_display !== null && set.weight_display !== undefined) {
+                weightVal = Math.round(set.weight_display * 10) / 10;
+            } else if (set.weight_kg !== null && set.weight_kg !== undefined) {
+                const converted = formatWeightDisplay(set.weight_kg, weightUnit);
+                weightVal = Math.round(converted * 10) / 10;
             }
             
-            // 格式化至小數後一位
-            weightVal = Math.round(weightVal * 10) / 10;
+            const repVal = set.reps !== null && set.reps !== undefined ? set.reps : '';
             
             setRowsHtml += `
                 <div class="set-row ${completedClass}">
@@ -1682,6 +1949,7 @@ async function renderWorkoutPage() {
                         <div class="input-unit-wrapper">
                             <input type="number" step="0.1" class="stepper-input" 
                                    value="${weightVal}" 
+                                   placeholder="${lastWeight}"
                                    onchange="updateLogSet('${log.id}', ${set.set_index}, 'weight', this.value)">
                             <button class="unit-badge-btn ${weightUnit}" onclick="toggleSetUnit('${log.id}', ${set.set_index})" title="點擊切換 KG/LB">
                                 ${weightUnit.toUpperCase()}
@@ -1694,16 +1962,18 @@ async function renderWorkoutPage() {
                     <div class="number-stepper">
                         <button class="stepper-btn" onclick="adjustStepperValue('${log.id}', ${set.set_index}, 'reps', -1)">-</button>
                         <input type="number" class="stepper-input" 
-                               value="${set.reps}" 
+                               value="${repVal}" 
+                               placeholder="${lastReps}"
                                onchange="updateLogSet('${log.id}', ${set.set_index}, 'reps', this.value)">
                         <button class="stepper-btn" onclick="adjustStepperValue('${log.id}', ${set.set_index}, 'reps', 1)">+</button>
                     </div>
 
-                    <!-- 是否完成勾選 -->
+                    <!-- 是否完成勾選與同前一組按鈕 -->
                     <div class="set-checkbox-wrapper">
                         <input type="checkbox" class="set-checkbox" 
                                ${set.completed ? 'checked' : ''} 
                                onchange="updateLogSet('${log.id}', ${set.set_index}, 'completed', this.checked); loadWorkouts();">
+                        ${set.set_index > 1 ? `<button class="btn btn-secondary" style="font-size: 0.65rem; padding: 0.2rem 0.4rem; margin-left: 0.5rem; line-height: 1;" onclick="clonePrevSet('${log.id}', ${set.set_index})" title="複製上一組重量與次數">👯 同前組</button>` : ''}
                     </div>
 
                     <!-- 刪除此組 -->
@@ -1756,6 +2026,9 @@ async function renderWorkoutPage() {
             <!-- 隱藏的動作預覽影片區 -->
             ${previewSectionHtml}
 
+            <!-- 雙層常設/當日 cues 提示區 -->
+            ${cuesHtml}
+
             <!-- 組數清單 -->
             <div class="sets-header">
                 <div>組</div>
@@ -1770,6 +2043,15 @@ async function renderWorkoutPage() {
                 <button class="btn btn-secondary btn-block" onclick="addSetToExercise('${log.id}')" style="margin-top: 0.5rem; font-size: 0.8rem; padding: 0.4rem;">
                     ＋ 新增一組 (Add Set)
                 </button>
+            </div>
+
+            <!-- 個人設備/體感備註區 -->
+            <div class="form-group" style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.75rem;">
+                <label class="form-label" style="font-size: 0.75rem; color: var(--text-secondary);">個人設備 / 體感備註 (Student Notes)</label>
+                <input type="text" class="form-input" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;" 
+                       value="${log.student_notes || ''}" 
+                       placeholder="${lastNotes || '例如：座椅高度 4，右膝微酸...'}" 
+                       onchange="updateStudentNotes('${log.id}', this.value)">
             </div>
         `;
 
@@ -1812,7 +2094,7 @@ function toggleMediaPreview(logId) {
 }
 
 // 增減數值按鈕輔助
-function adjustStepperValue(logId, setIndex, field, delta) {
+async function adjustStepperValue(logId, setIndex, field, delta) {
     const log = activeLogs.find(l => l.id === logId);
     if (!log) return;
 
@@ -1821,15 +2103,40 @@ function adjustStepperValue(logId, setIndex, field, delta) {
 
     if (field === 'weight') {
         const unit = set.weight_unit || 'kg';
-        const step = unit === 'lb' ? (delta > 0 ? 5 : -5) : (delta > 0 ? 2.5 : -2.5);
+        let currentWeightDisplay = set.weight_display !== null && set.weight_display !== undefined ? set.weight_display : null;
+        if (currentWeightDisplay === null && set.weight_kg !== null && set.weight_kg !== undefined) {
+            currentWeightDisplay = formatWeightDisplay(set.weight_kg, unit);
+        }
+        
+        if (currentWeightDisplay === null) {
+            const currentExId = log.swapped_exercise_id || log.exercise_id;
+            const lastCompletedLog = await getLastCompletedLog(currentUser.email, currentExId);
+            let lastWeight = 40;
+            if (lastCompletedLog && lastCompletedLog.sets && lastCompletedLog.sets.length > 0) {
+                const firstCompletedSet = lastCompletedLog.sets.find(s => s.completed) || lastCompletedLog.sets[0];
+                lastWeight = firstCompletedSet.weight_display || firstCompletedSet.weight_kg || 40;
+            }
+            currentWeightDisplay = lastWeight;
+        }
 
-        let currentWeightDisplay = set.weight_display !== undefined ? set.weight_display : formatWeightDisplay(set.weight_kg, unit);
+        const step = unit === 'lb' ? (delta > 0 ? 5 : -5) : (delta > 0 ? 2.5 : -2.5);
         let newWeightDisplay = Math.max(0, currentWeightDisplay + step);
         
-        updateLogSet(logId, setIndex, 'weight', newWeightDisplay);
+        await updateLogSet(logId, setIndex, 'weight', newWeightDisplay);
     } else if (field === 'reps') {
-        let newReps = Math.max(0, set.reps + delta);
-        updateLogSet(logId, setIndex, 'reps', newReps);
+        let currentReps = set.reps;
+        if (currentReps === null || currentReps === undefined) {
+            const currentExId = log.swapped_exercise_id || log.exercise_id;
+            const lastCompletedLog = await getLastCompletedLog(currentUser.email, currentExId);
+            let lastReps = 10;
+            if (lastCompletedLog && lastCompletedLog.sets && lastCompletedLog.sets.length > 0) {
+                const firstCompletedSet = lastCompletedLog.sets.find(s => s.completed) || lastCompletedLog.sets[0];
+                lastReps = firstCompletedSet.reps || 10;
+            }
+            currentReps = lastReps;
+        }
+        let newReps = Math.max(0, currentReps + delta);
+        await updateLogSet(logId, setIndex, 'reps', newReps);
     }
 
     triggerHapticFeedback();
@@ -1841,6 +2148,28 @@ function adjustStepperValue(logId, setIndex, field, delta) {
 // ==========================================
 
 window.addEventListener('DOMContentLoaded', async () => {
+    // A0. 密碼鎖防護牆 check
+    const gateUnlocked = localStorage.getItem('glowup_unlocked') === 'true';
+    if (!gateUnlocked) {
+        document.getElementById('password-gate').classList.add('active');
+        setTimeout(() => {
+            const pwdInput = document.getElementById('gate-password-input');
+            if (pwdInput) pwdInput.focus();
+        }, 100);
+    } else {
+        document.getElementById('password-gate').style.display = 'none';
+    }
+
+    // 密碼輸入 Enter 鍵監聽
+    const gatePasswordInput = document.getElementById('gate-password-input');
+    if (gatePasswordInput) {
+        gatePasswordInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                checkGatePassword();
+            }
+        });
+    }
+
     // A. 初始化 IndexedDB
     try {
         await initIndexedDB();

@@ -50,6 +50,7 @@ create table public.student_active_logs (
     status text not null default 'pending' check (status in ('pending', 'completed')),
     swapped_exercise_id text,           -- 學生替換的動作 ID
     swapped_exercise_name text,         -- 學生替換的動作名稱
+    student_notes text,                 -- 學生個人設定備註
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -60,6 +61,7 @@ create table public.exercises (
     name text not null,
     category text not null default '腿部', -- 肌群分類
     media_url text,
+    default_tips text,                  -- 動作常設提示
     group_id uuid references public.groups(id) on delete cascade, -- 屬於哪個群組 (NULL代表全域預設動作)
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );

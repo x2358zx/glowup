@@ -18,6 +18,20 @@
 </head>
 <body>
 
+    <!-- 解鎖密碼鎖防護牆 (Frosted Glass Lock Gate) -->
+    <div id="password-gate" class="password-gate-overlay">
+        <div class="password-gate-box">
+            <div class="lock-icon">🔒</div>
+            <h2>解鎖 GlowUp App</h2>
+            <p>請輸入密碼以進行安全存取</p>
+            <div style="margin: 1.5rem 0;">
+                <input type="password" id="gate-password-input" class="form-input" style="text-align: center; font-size: 1.5rem; letter-spacing: 0.5rem;" placeholder="••••" maxlength="6" autofocus>
+            </div>
+            <button onclick="checkGatePassword()" class="btn btn-primary btn-block">驗證並解鎖</button>
+            <p id="gate-error-msg" style="display: none; color: var(--danger); font-size: 0.8rem; margin-top: 1rem; font-weight: 700;">❌ 密碼錯誤，請重新輸入！</p>
+        </div>
+    </div>
+
     <!-- 頂部導航與網路狀態 -->
     <header>
         <div class="logo">
@@ -30,8 +44,10 @@
                 <option value="student2">👤 學員 (小美)</option>
                 <option value="coach">👑 教練 (阿強)</option>
             </select>
-            <!-- 網路連線小圓燈 -->
-            <div id="network-status" class="network-dot online" title="雲端已連線"></div>
+            <!-- 網路連線膠囊燈 -->
+            <div id="network-status" class="network-pill online" title="網路連線狀態">
+                <span class="status-dot"></span>Online
+            </div>
         </div>
     </header>
 
@@ -60,21 +76,45 @@
                     <div class="card-title" style="color: var(--secondary); margin-bottom: 1.25rem;">
                         <span>📋 課表發布主控台</span>
                     </div>
+                    
+                    <!-- 聯動雙下拉動作選擇 -->
                     <div class="form-group">
-                        <label class="form-label">選擇動作範本</label>
-                        <select id="coach-exercise-select" class="form-input">
+                        <label class="form-label">第一步：選擇肌群分類</label>
+                        <select id="coach-category-select" class="form-input" onchange="onCoachCategoryChange()">
+                            <option value="胸部">胸部 (Chest)</option>
+                            <option value="背部">背部 (Back)</option>
+                            <option value="腿部">腿部 (Legs)</option>
+                            <option value="肩部">肩部 (Shoulders)</option>
+                            <option value="核心">核心 (Core)</option>
+                            <option value="手臂">手臂 (Arms)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">第二步：選擇動作範本</label>
+                        <select id="coach-exercise-select" class="form-input" onchange="onCoachExerciseChange()">
                             <!-- 由 JS 動態填充 -->
                         </select>
                     </div>
+                    
+                    <!-- 動作範本即時預覽區域 -->
+                    <div class="form-group">
+                        <label class="form-label">動作影片預覽</label>
+                        <div id="coach-exercise-preview-box" class="preview-thumbnail-box">
+                            <div class="preview-placeholder">選擇動作以載入影音</div>
+                        </div>
+                    </div>
+                    
                     <div class="form-group">
                         <label class="form-label">目標組數 (Target Sets)</label>
                         <input type="number" id="coach-sets-input" class="form-input" value="4" min="1" max="10">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">教練提示 / 備註</label>
-                        <input type="text" id="coach-notes-input" class="form-input" placeholder="例如：控制離心速度，注意安全...">
+                        <label class="form-label">當日客製提示 / 課表備註 (Daily Reminders)</label>
+                        <input type="text" id="coach-notes-input" class="form-input" placeholder="例如：今日做組控制在RPE 8，離心加強慢速...">
                     </div>
+                    
                     <button class="btn btn-accent btn-block" onclick="addMasterWorkout()">＋ 發布至今日主課表</button>
+                    <button class="btn btn-secondary btn-block" style="margin-top: 0.5rem;" onclick="copyPreviousWeekTemplate()">📋 複製上週同星期課表模板</button>
                     
                     <div style="margin-top: 1.5rem;">
                         <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-secondary);">今日已發布課表模板：</div>
@@ -127,6 +167,12 @@
                     <label class="form-label">示範影片/圖片網址 (Media URL)</label>
                     <input type="text" id="lib-ex-url" class="form-input" placeholder="https://your-media-link.mp4">
                 </div>
+                <!-- 動作常設提示 cues -->
+                <div class="form-group">
+                    <label class="form-label">常設提示 / 結構提示 (Exercise-Level Tips)</label>
+                    <textarea id="lib-ex-tips" class="form-input" placeholder="例如：手肘內收，背部收緊不聳肩，腳踩實地面..." style="resize: vertical; min-height: 70px;"></textarea>
+                </div>
+                
                 <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
                     <button class="btn btn-primary" style="flex:1;" onclick="addOrUpdateLibraryExercise()">儲存 / 更新動作</button>
                     <button class="btn btn-danger" style="flex:1;" onclick="deleteLibraryExercise()">刪除動作</button>
@@ -223,7 +269,6 @@
                 
                 <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
                     <button class="btn btn-primary" style="flex:1;" onclick="saveSettings()">儲存個人設定</button>
-                    <button class="btn btn-secondary" style="flex:1;" onclick="loadDemoMockData()">💡 載入體驗數據</button>
                 </div>
             </div>
             
@@ -306,7 +351,7 @@
 
     <!-- ==========================================
          自訂彈窗：新增自訂動作 (Add Custom Exercise Modal)
-         ========================================= -->
+         ========================================== -->
     <div id="custom-exercise-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
@@ -324,6 +369,21 @@
                     <button class="btn btn-accent" style="flex:1;" onclick="confirmAddCustomExercise()">確認新增</button>
                     <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('custom-exercise-modal').classList.remove('active')">取消</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 浮動組間休息計時器 (Rest Timer Floating Overlay) -->
+    <div id="rest-timer-overlay" class="rest-timer-box">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+            <span style="font-size: 1.25rem;">⏱️</span>
+            <div style="flex: 1; text-align: left;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;">組間休息計時器</div>
+                <div id="timer-display" style="font-size: 1.35rem; font-weight: 800; font-family: var(--font-heading); color: var(--secondary); line-height: 1;">90 秒</div>
+            </div>
+            <div style="display: flex; gap: 0.3rem;">
+                <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 0.3rem 0.5rem; line-height: 1;" onclick="adjustTimer(15)">+15s</button>
+                <button class="btn btn-danger btn-icon" style="width: 28px; height: 28px; font-size: 0.75rem;" onclick="stopTimer()">✕</button>
             </div>
         </div>
     </div>
