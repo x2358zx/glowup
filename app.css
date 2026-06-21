@@ -894,7 +894,7 @@ input:checked + .slider:before {
     position: fixed;
     bottom: 80px;
     left: 50%;
-    transform: translateX(-50%) translateY(100px);
+    transform: translateX(-50%) translateY(30px);
     background: rgba(99, 102, 241, 0.95);
     color: white;
     padding: 0.6rem 1.2rem;
@@ -906,19 +906,64 @@ input:checked + .slider:before {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease, visibility 0.3s;
     pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
 }
 
 .sync-toast.active {
     transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    visibility: visible;
 }
 
 /* ==========================================================================
-   Font Awesome 補全 (如果離線時無法載入，我們使用純 CSS 的圖標作為 fallback，
-   或直接在 HTML 內嵌 SVG / 使用字元，但為防萬一，我們在 PWA 的 HTML 中使用標準 icon，
-   並在此處寫入通用 fallback 以防萬一)
+   帳號切換器與進階設定收合樣式
    ========================================================================== */
+.account-switcher {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 0.5rem;
+    outline: none;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+}
+
+.account-switcher:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 8px var(--primary-glow);
+}
+
+details.advanced-settings {
+    margin-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+    padding-top: 1rem;
+}
+
+details.advanced-settings summary {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    cursor: pointer;
+    outline: none;
+    user-select: none;
+    transition: var(--transition-smooth);
+    padding: 0.5rem 0;
+}
+
+details.advanced-settings summary:hover {
+    color: var(--primary);
+}
+
+details.advanced-settings[open] {
+    padding-bottom: 0.5rem;
+}
+
 .icon-placeholder {
     width: 20px;
     height: 20px;
@@ -926,3 +971,4 @@ input:checked + .slider:before {
     background-size: contain;
     background-repeat: no-repeat;
 }
+

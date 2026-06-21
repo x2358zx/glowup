@@ -2,15 +2,45 @@
 // GlowUp PWA 離線健身應用 - 核心 JavaScript 邏輯
 // ==========================================================================
 
+// --- Supabase 正式連線設定 (如果您有自己的專案，可以直接在此填寫，部署時會直接套用) ---
+const SUPABASE_CONFIG = {
+    url: '',      // 例如: 'https://your-project.supabase.co'
+    anonKey: ''   // 例如: 'your-anon-key'
+};
+
+// --- 預設測試帳號清單 (點擊上方切換器時會自動套用) ---
+const PRESET_ACCOUNTS = {
+    'student1': {
+        email: 'student1@glowup.com',
+        name: '學員 (小明)',
+        role: 'student',
+        groupId: 'demo-group-123'
+    },
+    'student2': {
+        email: 'student2@glowup.com',
+        name: '學員 (小美)',
+        role: 'student',
+        groupId: 'demo-group-123'
+    },
+    'coach': {
+        email: 'coach@glowup.com',
+        name: '教練 (阿強)',
+        role: 'coach',
+        groupId: 'demo-group-123'
+    }
+};
+
 // --- 全域狀態與設定 ---
 let db = null;
 let supabaseClient = null;
 let currentUnit = localStorage.getItem('glowup_unit') || 'kg'; // 'kg' 或 'lb'
+
+// 預設以小明身分登入
 let currentUser = {
-    email: localStorage.getItem('glowup_email') || 'student@glowup.com',
-    name: localStorage.getItem('glowup_name') || '小明',
-    role: localStorage.getItem('glowup_role') || 'student', // 'student' 或 'coach'
-    groupId: localStorage.getItem('glowup_group_id') || 'demo-group-123'
+    email: localStorage.getItem('glowup_email') || PRESET_ACCOUNTS.student1.email,
+    name: localStorage.getItem('glowup_name') || PRESET_ACCOUNTS.student1.name,
+    role: localStorage.getItem('glowup_role') || PRESET_ACCOUNTS.student1.role,
+    groupId: localStorage.getItem('glowup_group_id') || PRESET_ACCOUNTS.student1.groupId
 };
 let selectedDate = new Date().toISOString().split('T')[0];
 let activeLogs = [];
@@ -89,8 +119,8 @@ function initIndexedDB() {
 // 2. 初始化 Supabase Client
 // ==========================================
 function initSupabase() {
-    const supabaseUrl = localStorage.getItem('glowup_supabase_url');
-    const supabaseKey = localStorage.getItem('glowup_supabase_key');
+    let supabaseUrl = SUPABASE_CONFIG.url || localStorage.getItem('glowup_supabase_url');
+    let supabaseKey = SUPABASE_CONFIG.anonKey || localStorage.getItem('glowup_supabase_key');
 
     if (supabaseUrl && supabaseKey) {
         try {
@@ -584,6 +614,140 @@ async function confirmSwapExercise() {
 
     syncOfflineData();
     loadWorkouts();
+}
+
+// --- 觸覺回饋 ---
+function triggerHapticFeedback() {
+    if (navigator.vibrate) {
+        navigator.vibrate(12); // 微震動 12 毫秒
+    }
+}
+
+// --- 快速帳號切換 ---
+async function switchAccount(accountId) {
+    const account = PRESET_ACCOUNTS[accountId];
+    if (!account) return;
+
+    currentUser = { ...account };
+    localStorage.setItem('glowup_email', currentUser.email);
+    localStorage.setItem('glowup_name', currentUser.name);
+    localStorage.setItem('glowup_role', currentUser.role);
+    localStorage.setItem('glowup_group_id', currentUser.groupId);
+
+    // 更新設定頁面的 UI 顯示
+    renderSettingsPage();
+    
+    // 如果是教練，加載教練控制台
+    loadCoachConsole();
+
+    // 更新全域帳號切換選單
+    const switcher = document.getElementById('global-account-switcher');
+    if (switcher) switcher.value = accountId;
+    
+    showSyncToast(`👤 已切換身份為：${currentUser.name}`);
+    triggerHapticFeedback();
+    
+    // 重新載入課表與行行事曆
+    await loadWorkouts();
+    if (document.getElementById('calendar-page').classList.contains('active')) {
+        renderCalendar();
+        loadHistoryLogs();
+    }
+}
+
+// --- 刪除整個訓練動作卡片 ---
+async function deleteActiveLog(logId) {
+    if (!confirm('您確定要刪除這項動作的所有訓練紀錄嗎？')) return;
+    
+    triggerHapticFeedback();
+
+    // 1. 從 IndexedDB 刪除
+    await deleteActiveLogFromIndexedDB(logId);
+    
+    // 2. 如果在線且設定了 Supabase，從雲端刪除
+    if (navigator.onLine && supabaseClient) {
+        try {
+            await supabaseClient
+                .from('student_active_logs')
+                .delete()
+                .eq('id', logId);
+        } catch (e) {
+            console.warn('[Sync] 雲端刪除記錄失敗，連線後將重試');
+        }
+    }
+    
+    showSyncToast('🗑 已刪除該訓練動作！');
+    loadWorkouts();
+}
+
+// --- 自訂動作新增彈窗與功能 ---
+function openAddCustomExerciseModal() {
+    const select = document.getElementById('custom-exercise-select');
+    select.innerHTML = '';
+    
+    // 填充所有的動作
+    Object.entries(EXERCISE_MEDIA_DATABASE).forEach(([exId, details]) => {
+        const option = document.createElement('option');
+        option.value = exId;
+        option.textContent = details.name;
+        select.appendChild(option);
+    });
+
+    document.getElementById('custom-exercise-modal').classList.add('active');
+}
+
+async function confirmAddCustomExercise() {
+    const exId = document.getElementById('custom-exercise-select').value;
+    if (!exId) return;
+
+    await addCustomExercise(exId);
+    document.getElementById('custom-exercise-modal').classList.remove('active');
+}
+
+async function addCustomExercise(exerciseId) {
+    const mediaInfo = EXERCISE_MEDIA_DATABASE[exerciseId];
+    if (!mediaInfo) return;
+
+    triggerHapticFeedback();
+
+    const email = currentUser.email;
+    const groupId = currentUser.groupId;
+    const dateStr = selectedDate;
+
+    // 建立 3 組預設資料
+    const defaultSets = [
+        { set_index: 1, reps: 10, weight_kg: 40, completed: false },
+        { set_index: 2, reps: 10, weight_kg: 40, completed: false },
+        { set_index: 3, reps: 10, weight_kg: 40, completed: false }
+    ];
+
+    const newLog = {
+        id: crypto.randomUUID(),
+        master_workout_id: null,
+        group_id: groupId,
+        student_email: email,
+        date: dateStr,
+        exercise_id: exerciseId,
+        exercise_name: mediaInfo.name,
+        target_sets: 3,
+        sets: defaultSets,
+        status: 'pending',
+        swapped_exercise_id: null,
+        swapped_exercise_name: null,
+        updated_at: new Date().toISOString(),
+        synced: false
+    };
+
+    await saveActiveLogToIndexedDB(newLog);
+    
+    // 預載影片
+    if (navigator.onLine) {
+        preloadExerciseMedia(exerciseId, mediaInfo.mediaUrl);
+    }
+
+    syncOfflineData();
+    loadWorkouts();
+    showSyncToast(`＋ 已新增自訂動作：${mediaInfo.name}`);
 }
 
 // ==========================================
@@ -1259,6 +1423,9 @@ async function renderWorkoutPage() {
                     <button class="btn btn-secondary btn-icon" onclick="openSwapModal('${log.id}')" title="替換此動作">
                         <i>🔄</i>
                     </button>
+                    <button class="btn btn-danger btn-icon" onclick="deleteActiveLog('${log.id}')" title="刪除此動作">
+                        <i>✕</i>
+                    </button>
                 </div>
             </div>
 
@@ -1284,6 +1451,16 @@ async function renderWorkoutPage() {
 
         listContainer.appendChild(card);
     }
+
+    // 渲染「新增自訂動作」按鈕於列表底部
+    const addCustomBtnContainer = document.createElement('div');
+    addCustomBtnContainer.style = 'margin-top: 2rem; display: flex; justify-content: center;';
+    addCustomBtnContainer.innerHTML = `
+        <button class="btn btn-accent btn-block" onclick="openAddCustomExerciseModal()">
+            ＋ 新增自訂訓練動作 (Add Custom Exercise)
+        </button>
+    `;
+    listContainer.appendChild(addCustomBtnContainer);
 }
 
 // 展開或隱藏影音教學
@@ -1319,8 +1496,16 @@ function adjustStepperValue(logId, setIndex, field, delta) {
     if (!set) return;
 
     if (field === 'weight') {
+        // 智慧重量調整：KG 步進 2.5kg，LB 步進 5lb
+        let step = delta;
+        if (currentUnit === 'lb') {
+            step = delta > 0 ? 5 : -5;
+        } else {
+            step = delta > 0 ? 2.5 : -2.5;
+        }
+
         let currentWeightDisplay = formatWeightDisplay(set.weight_kg);
-        let newWeightDisplay = Math.max(0, currentWeightDisplay + delta);
+        let newWeightDisplay = Math.max(0, currentWeightDisplay + step);
         
         // 寫入
         updateLogSet(logId, setIndex, 'weight', newWeightDisplay);
@@ -1328,6 +1513,8 @@ function adjustStepperValue(logId, setIndex, field, delta) {
         let newReps = Math.max(0, set.reps + delta);
         updateLogSet(logId, setIndex, 'reps', newReps);
     }
+
+    triggerHapticFeedback();
 
     // 重新繪製 UI
     loadWorkouts();
@@ -1374,6 +1561,19 @@ window.addEventListener('DOMContentLoaded', async () => {
             document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
         });
     });
+
+    // E. 綁定全域快速帳號切換選單
+    const switcher = document.getElementById('global-account-switcher');
+    if (switcher) {
+        const currentEmail = currentUser.email;
+        if (currentEmail === PRESET_ACCOUNTS.student1.email) switcher.value = 'student1';
+        else if (currentEmail === PRESET_ACCOUNTS.student2.email) switcher.value = 'student2';
+        else if (currentEmail === PRESET_ACCOUNTS.coach.email) switcher.value = 'coach';
+        
+        switcher.addEventListener('change', (e) => {
+            switchAccount(e.target.value);
+        });
+    }
 
     // 預設加載今日課表
     loadWorkouts();

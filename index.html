@@ -23,7 +23,13 @@
         <div class="logo">
             <span class="logo-dot"></span>GlowUp
         </div>
-        <div class="status-panel">
+        <div class="status-panel" style="display: flex; align-items: center; gap: 0.6rem;">
+            <!-- 快速切換身分選單 -->
+            <select id="global-account-switcher" class="account-switcher" title="快速切換角色身份">
+                <option value="student1">👤 學員 (小明)</option>
+                <option value="student2">👤 學員 (小美)</option>
+                <option value="coach">👑 教練 (阿強)</option>
+            </select>
             <div id="network-status" class="badge-status online">
                 <span class="status-dot"></span>連線中
             </div>
@@ -165,21 +171,25 @@
             </div>
 
             <div class="card" style="border-color: rgba(99, 102, 241, 0.25);">
-                <h3 style="margin-bottom: 1.25rem; color: var(--primary);">☁ Supabase 連線設定 (GitHub Pages 部署)</h3>
-                
-                <div class="form-group">
-                    <label class="form-label">Supabase URL</label>
-                    <input type="text" id="set-supabase-url" class="form-input" placeholder="https://your-project.supabase.co">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom: 1.25rem;">
+                    <h3 style="color: var(--primary); margin:0;">☁ 雲端連線設定</h3>
+                    <button class="btn btn-secondary" style="font-size:0.75rem; padding:0.4rem 0.8rem;" onclick="loadDemoMockData()">💡 載入體驗模擬數據</button>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Supabase Anon Key</label>
-                    <input type="password" id="set-supabase-key" class="form-input" placeholder="your-anon-key">
-                </div>
-                
-                <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
-                    <button class="btn btn-primary" style="flex:1;" onclick="saveSettings()">儲存並重新載入</button>
-                    <button class="btn btn-secondary" onclick="loadDemoMockData()">💡 載入體驗模擬數據</button>
-                </div>
+
+                <details class="advanced-settings">
+                    <summary>⚙ 點此展開進階連線設定 (Supabase API)...</summary>
+                    <div style="margin-top:1rem;">
+                        <div class="form-group">
+                            <label class="form-label">Supabase URL</label>
+                            <input type="text" id="set-supabase-url" class="form-input" placeholder="https://your-project.supabase.co">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Supabase Anon Key</label>
+                            <input type="password" id="set-supabase-key" class="form-input" placeholder="your-anon-key">
+                        </div>
+                        <button class="btn btn-primary btn-block" style="margin-top:1rem;" onclick="saveSettings()">儲存連線設定並重新載入</button>
+                    </div>
+                </details>
             </div>
             
             <div style="text-align: center; font-size: 0.75rem; color: var(--text-muted); margin-top: 2rem;">
@@ -250,6 +260,30 @@
                 </div>
                 <div style="font-size:0.7rem; color:var(--text-muted); margin-top:1rem; text-align:center;">
                     1RM = 重量 × (1 + 次數 / 30) (採用 Epley 公式估算完成組數的最大極限重量)
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         自訂彈窗：新增自訂動作 (Add Custom Exercise Modal)
+         ========================================== -->
+    <div id="custom-exercise-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>＋ 新增自訂動作</h3>
+                <button class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">選擇動作種類</label>
+                    <select id="custom-exercise-select" class="form-input">
+                        <!-- 由 JS 動態填充 -->
+                    </select>
+                </div>
+                <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
+                    <button class="btn btn-accent" style="flex:1;" onclick="confirmAddCustomExercise()">確認新增</button>
+                    <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('custom-exercise-modal').classList.remove('active')">取消</button>
                 </div>
             </div>
         </div>
