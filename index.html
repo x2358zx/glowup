@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>GlowUp - 離線協作健身日誌</title>
+    
+    <!-- PWA 支援 -->
+    <meta name="theme-color" content="#121214">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="GlowUp">
+    <link rel="manifest" href="manifest.json">
+    <link rel="shortcut icon" href="icons/icon-192.png" type="image/png">
+    
+    <!-- CSS 樣式表 -->
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+    <!-- 頂部導航與網路狀態 -->
+    <header>
+        <div class="logo">
+            <span class="logo-dot"></span>GlowUp
+        </div>
+        <div class="status-panel">
+            <div id="network-status" class="badge-status online">
+                <span class="status-dot"></span>連線中
+            </div>
+        </div>
+    </header>
+
+    <!-- 靜態消息通知 -->
+    <div id="sync-toast" class="sync-toast">🔄 正在同步數據...</div>
+
+    <!-- 主區塊 -->
+    <main>
+        
+        <!-- ==========================================
+             分頁 1：今日訓練頁面 (Workout Tab)
+             ========================================== -->
+        <section id="workout-page" class="app-page active">
+            <!-- 頂部日期與單位控制 -->
+            <div class="workout-control-header">
+                <div class="date-selector">
+                    <input type="date" id="workout-date-picker">
+                </div>
+                
+                <div class="toggle-switch-container">
+                    <span class="toggle-switch-label">單位：</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="unit-toggle-cb">
+                        <span class="slider"></span>
+                    </label>
+                    <span id="toggle-unit-indicator" class="toggle-unit-text">KG</span>
+                </div>
+            </div>
+
+            <!-- 教練專用管理面板 (僅當前角色為 coach 時顯示) -->
+            <div id="coach-section" class="card" style="display: none; border-color: rgba(20, 184, 166, 0.3);">
+                <div class="card-title" style="color: var(--secondary);">
+                    <span>🛠 教練課表發布主控台</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">選擇動作範本</label>
+                    <select id="coach-exercise-select">
+                        <option value="EX_SQUAT_01">後背蹲舉 (Back Squat)</option>
+                        <option value="EX_BENCH_01">槓鈴臥推 (Bench Press)</option>
+                        <option value="EX_DEAD_01">硬舉 (Deadlift)</option>
+                        <option value="EX_PULLUP_01">引體向上 (Pull-Up)</option>
+                        <option value="EX_SHOULDER_01">啞鈴肩推 (Dumbbell Shoulder Press)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">目標組數 (Target Sets)</label>
+                    <input type="number" id="coach-sets-input" class="form-input" value="4" min="1" max="10">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">教練提示 / 備註</label>
+                    <input type="text" id="coach-notes-input" class="form-input" placeholder="例如：控制離心速度，注意安全...">
+                </div>
+                <button class="btn btn-accent btn-block" onclick="addMasterWorkout()">＋ 發布至今日主課表</button>
+                
+                <div style="margin-top: 1.5rem;">
+                    <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-secondary);">今日已發布課表模板：</div>
+                    <div id="coach-master-list"></div>
+                </div>
+            </div>
+
+            <!-- 未 Claim 領取今日課表時顯示的區塊 -->
+            <div id="claim-workout-section" class="card claim-panel" style="display: none;">
+                <div class="claim-icon">🏋️‍♂️</div>
+                <h2 style="margin-bottom: 0.5rem;">尚未領取今日課表</h2>
+                <p id="claim-master-info" class="claim-text">今日教練尚未發布主課表範本。</p>
+                <button class="btn btn-primary" onclick="claimWorkout()">⚡ 點此 Claim 領取課表</button>
+            </div>
+
+            <!-- 學生的主動訓練日誌卡片容器 -->
+            <div id="active-workouts-container">
+                <!-- 由 JS 動態渲染卡片 -->
+            </div>
+        </section>
+
+        <!-- ==========================================
+             分頁 2：歷史與行事曆頁面 (Calendar Tab)
+             ========================================== -->
+        <section id="calendar-page" class="app-page">
+            <div class="card">
+                <div class="card-title" style="margin-bottom: 1.5rem;">
+                    <button class="btn btn-secondary btn-icon" onclick="changeMonth(-1)">◀</button>
+                    <span id="calendar-month-year" style="font-family: var(--font-heading); font-weight:800;">2026年 6月</span>
+                    <button class="btn btn-secondary btn-icon" onclick="changeMonth(1)">▶</button>
+                </div>
+                
+                <!-- 日曆網格 -->
+                <div class="calendar-grid">
+                    <div class="calendar-header-day">日</div>
+                    <div class="calendar-header-day">一</div>
+                    <div class="calendar-header-day">二</div>
+                    <div class="calendar-header-day">三</div>
+                    <div class="calendar-header-day">四</div>
+                    <div class="calendar-header-day">五</div>
+                    <div class="calendar-header-day">六</div>
+                </div>
+                <div id="calendar-days-grid" class="calendar-grid">
+                    <!-- 由 JS 動態生成格子 -->
+                </div>
+            </div>
+
+            <!-- 歷史概要清單 -->
+            <div class="card">
+                <h3 style="margin-bottom: 1rem;">📋 訓練歷史概要</h3>
+                <div id="history-summary-list" class="history-list">
+                    <!-- 由 JS 載入聚合字串 -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ==========================================
+             分頁 3：個人帳號與 API 設定頁面 (Settings Tab)
+             ========================================== -->
+        <section id="settings-page" class="app-page">
+            <div class="card">
+                <h2 style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">⚙ 個人設定</h2>
+                
+                <div class="form-group">
+                    <label class="form-label">電子信箱 Email (同群組協作識別碼)</label>
+                    <input type="email" id="set-email" class="form-input" placeholder="name@example.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">用戶姓名</label>
+                    <input type="text" id="set-name" class="form-input" placeholder="您的暱稱">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">角色身份</label>
+                    <select id="set-role" onchange="currentUser.role=this.value; loadCoachConsole();">
+                        <option value="student">學生 (Student)</option>
+                        <option value="coach">教練 (Coach)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">健身群組 ID (Group UUID)</label>
+                    <input type="text" id="set-group-id" class="form-input" placeholder="請輸入群組 ID">
+                </div>
+            </div>
+
+            <div class="card" style="border-color: rgba(99, 102, 241, 0.25);">
+                <h3 style="margin-bottom: 1.25rem; color: var(--primary);">☁ Supabase 連線設定 (GitHub Pages 部署)</h3>
+                
+                <div class="form-group">
+                    <label class="form-label">Supabase URL</label>
+                    <input type="text" id="set-supabase-url" class="form-input" placeholder="https://your-project.supabase.co">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Supabase Anon Key</label>
+                    <input type="password" id="set-supabase-key" class="form-input" placeholder="your-anon-key">
+                </div>
+                
+                <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
+                    <button class="btn btn-primary" style="flex:1;" onclick="saveSettings()">儲存並重新載入</button>
+                    <button class="btn btn-secondary" onclick="loadDemoMockData()">💡 載入體驗模擬數據</button>
+                </div>
+            </div>
+            
+            <div style="text-align: center; font-size: 0.75rem; color: var(--text-muted); margin-top: 2rem;">
+                GlowUp PWA v1.0.0 | 設計專為地下室無網路環境
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ==========================================
+         底部導航欄 (Mobile Bottom Nav)
+         ========================================== -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" onclick="switchTab('workout')">
+            <i>🏋️‍♂️</i>
+            今日訓練
+        </button>
+        <button class="nav-item" onclick="switchTab('calendar')">
+            <i>📅</i>
+            歷史日誌
+        </button>
+        <button class="nav-item" onclick="switchTab('settings')">
+            <i>⚙</i>
+            個人設定
+        </button>
+    </nav>
+
+    <!-- ==========================================
+         自訂彈窗：替換動作 (Swap Exercise Modal)
+         ========================================== -->
+    <div id="swap-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔄 替換訓練動作</h3>
+                <button class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">選擇新動作</label>
+                    <select id="swap-exercise-select" class="form-input">
+                        <!-- 由 JS 動態填充 -->
+                    </select>
+                </div>
+                <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
+                    <button class="btn btn-primary" style="flex:1;" onclick="confirmSwapExercise()">確認替換</button>
+                    <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('swap-modal').classList.remove('active')">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         自訂彈窗：1RM 趨勢圖 (1RM History Chart Modal)
+         ========================================== -->
+    <div id="chart-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 550px;">
+            <div class="modal-header">
+                <h3 id="chart-modal-title">📈 1RM 歷史趨勢估算</h3>
+                <button class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- 折線圖 Canvas -->
+                <div class="chart-container">
+                    <canvas id="oneRepMaxChart"></canvas>
+                    <div id="chart-fallback-text" style="display:none; text-align:center; padding-top:4rem; color:var(--text-muted);">
+                        此動作尚無任何完成的組數紀錄，無法繪製 1RM 趨勢圖。
+                    </div>
+                </div>
+                <div style="font-size:0.7rem; color:var(--text-muted); margin-top:1rem; text-align:center;">
+                    1RM = 重量 × (1 + 次數 / 30) (採用 Epley 公式估算完成組數的最大極限重量)
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 外部函式庫 (快取 CDN 資源) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- 核心 JS 邏輯 -->
+    <script src="app.js" defer></script>
+</body>
+</html>
