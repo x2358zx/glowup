@@ -91,6 +91,33 @@
                     <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-secondary);">今日已發布課表模板：</div>
                     <div id="coach-master-list"></div>
                 </div>
+
+                <!-- 動作庫管理收摺欄 -->
+                <details style="margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                    <summary style="font-size: 0.85rem; font-weight: 700; color: var(--secondary); cursor: pointer;">📦 管理動作庫範本 (Manage Exercise Library)</summary>
+                    <div style="margin-top: 1rem;">
+                        <div class="form-group">
+                            <label class="form-label">動作代碼 ID (例如: EX_LEGPRESS_01)</label>
+                            <input type="text" id="lib-ex-id" class="form-input" placeholder="EX_LEGPRESS_01">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">動作名稱 (Name)</label>
+                            <input type="text" id="lib-ex-name" class="form-input" placeholder="腿推機">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">示範影片連結 (Media URL)</label>
+                            <input type="text" id="lib-ex-url" class="form-input" placeholder="https://...">
+                        </div>
+                        <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
+                            <button class="btn btn-accent" style="flex:1;" onclick="addOrUpdateLibraryExercise()">儲存 / 更新動作</button>
+                            <button class="btn btn-danger" style="flex:1;" onclick="deleteLibraryExercise()">刪除動作</button>
+                        </div>
+                        <div style="margin-top: 1.5rem;">
+                            <label class="form-label">目前動作庫清單 (點擊可載入編輯)</label>
+                            <div id="lib-exercise-list" style="max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 0.5rem; padding: 0.5rem; border: 1px solid var(--border-color);"></div>
+                        </div>
+                    </div>
+                </details>
             </div>
 
             <!-- 未 Claim 領取今日課表時顯示的區塊 -->

@@ -71,12 +71,15 @@ const EXERCISE_MEDIA_DATABASE = {
     }
 };
 
+// --- 動態動作庫 (預設為預設動作庫，後續將疊加自訂動作) ---
+let exerciseLibrary = { ...EXERCISE_MEDIA_DATABASE };
+
 // ==========================================
 // 1. 初始化 IndexedDB
 // ==========================================
 function initIndexedDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('GlowUpDB', 1);
+        const request = indexedDB.open('GlowUpDB', 2);
 
         request.onupgradeneeded = function(e) {
             const database = e.target.result;
@@ -99,6 +102,10 @@ function initIndexedDB() {
             // 建立個人設定快取
             if (!database.objectStoreNames.contains('profiles')) {
                 database.createObjectStore('profiles', { keyPath: 'id' });
+            }
+            // 建立動態動作庫快取
+            if (!database.objectStoreNames.contains('exercises')) {
+                database.createObjectStore('exercises', { keyPath: 'id' });
             }
         };
 
@@ -434,7 +441,7 @@ async function loadWorkouts() {
         });
 
         allExerciseIds.forEach(exId => {
-            const mediaInfo = EXERCISE_MEDIA_DATABASE[exId];
+            const mediaInfo = exerciseLibrary[exId];
             if (mediaInfo) {
                 preloadExerciseMedia(exId, mediaInfo.mediaUrl);
             }
@@ -579,8 +586,8 @@ function openSwapModal(logId) {
     select.innerHTML = '';
     
     // 填充除了當前動作以外的動作清單
-    Object.entries(EXERCISE_MEDIA_DATABASE).forEach(([exId, details]) => {
-        if (exId !== log.exercise_id) {
+    Object.entries(exerciseLibrary).forEach(([exId, details]) => {
+        if (exId !== log.exercise_id && exId !== log.swapped_exercise_id) {
             const option = document.createElement('option');
             option.value = exId;
             option.textContent = details.name;
@@ -593,7 +600,7 @@ function openSwapModal(logId) {
 
 async function confirmSwapExercise() {
     const newExId = document.getElementById('swap-exercise-select').value;
-    const mediaInfo = EXERCISE_MEDIA_DATABASE[newExId];
+    const mediaInfo = exerciseLibrary[newExId];
     if (!mediaInfo || !swappingLogId) return;
 
     const log = activeLogs.find(l => l.id === swappingLogId);
@@ -646,6 +653,9 @@ async function switchAccount(accountId) {
     
     showSyncToast(`👤 已切換身份為：${currentUser.name}`);
     triggerHapticFeedback();
+    
+    // 載入該身分的動態動作庫
+    await loadExerciseLibrary();
     
     // 重新載入課表與行行事曆
     await loadWorkouts();
@@ -821,7 +831,7 @@ function render1RMChart(exerciseId, dataPoints) {
     const modal = document.getElementById('chart-modal');
     modal.classList.add('active');
 
-    const exName = EXERCISE_MEDIA_DATABASE[exerciseId]?.name || exerciseId;
+    const exName = exerciseLibrary[exerciseId]?.name || exerciseId;
     document.getElementById('chart-modal-title').textContent = `${exName} - 1RM 估算趨勢`;
 
     const ctx = document.getElementById('oneRepMaxChart').getContext('2d');
@@ -1102,7 +1112,7 @@ async function addMasterWorkout() {
     const exId = exerciseSelect.value;
     const targetSets = parseInt(setsInput.value) || 3;
     const notes = notesInput.value;
-    const exerciseName = EXERCISE_MEDIA_DATABASE[exId].name;
+    const exerciseName = exerciseLibrary[exId].name;
 
     const newMaster = {
         id: crypto.randomUUID(),
@@ -1161,6 +1171,190 @@ async function deleteMasterWorkout(id) {
         }
         loadWorkouts();
     };
+}
+
+// --- 動作庫管理業務邏輯 ---
+function populateExerciseSelects() {
+    const selects = [
+        document.getElementById('coach-exercise-select'),
+        document.getElementById('custom-exercise-select'),
+        document.getElementById('swap-exercise-select')
+    ];
+    
+    selects.forEach(select => {
+        if (!select) return;
+        select.innerHTML = '';
+        Object.entries(exerciseLibrary).forEach(([exId, details]) => {
+            const option = document.createElement('option');
+            option.value = exId;
+            option.textContent = details.name;
+            select.appendChild(option);
+        });
+    });
+}
+
+async function addOrUpdateLibraryExercise() {
+    const idInput = document.getElementById('lib-ex-id');
+    const nameInput = document.getElementById('lib-ex-name');
+    const urlInput = document.getElementById('lib-ex-url');
+
+    const exId = idInput.value.trim().toUpperCase();
+    const exName = nameInput.value.trim();
+    const mediaUrl = urlInput.value.trim();
+
+    if (!exId || !exName) {
+        alert('請輸入動作代碼 ID 與動作名稱！');
+        return;
+    }
+
+    const newExercise = {
+        id: exId,
+        name: exName,
+        media_url: mediaUrl || null,
+        group_id: currentUser.groupId
+    };
+
+    // 1. 寫入 IndexedDB
+    const transaction = db.transaction(['exercises'], 'readwrite');
+    transaction.objectStore('exercises').put(newExercise);
+    
+    transaction.oncomplete = async function() {
+        console.log('[Exercise Lib] 本地動作庫已更新');
+        
+        // 2. 如果在線且有 Supabase，上傳雲端
+        if (navigator.onLine && supabaseClient) {
+            try {
+                const { error } = await supabaseClient
+                    .from('exercises')
+                    .upsert(newExercise);
+                if (error) throw error;
+                showSyncToast('✅ 動作已成功發布至雲端動作庫！');
+            } catch (e) {
+                console.error('[Exercise Lib] 無法發布動作至雲端:', e);
+            }
+        }
+
+        // 清空輸入
+        idInput.value = '';
+        nameInput.value = '';
+        urlInput.value = '';
+
+        // 重新加載並渲染
+        await loadExerciseLibrary();
+        
+        // 重新載入課表渲染 (以確保卡片上的動作名稱同步更新)
+        loadWorkouts();
+    };
+}
+
+async function deleteLibraryExercise() {
+    const idInput = document.getElementById('lib-ex-id');
+    const exId = idInput.value.trim().toUpperCase();
+
+    if (!exId) {
+        alert('請在 ID 欄位輸入要刪除的動作代碼！');
+        return;
+    }
+
+    if (!confirm(`您確定要將動作 ${exId} 從動作庫中刪除嗎？`)) return;
+
+    // 1. 從 IndexedDB 刪除
+    const transaction = db.transaction(['exercises'], 'readwrite');
+    transaction.objectStore('exercises').delete(exId);
+    
+    transaction.oncomplete = async function() {
+        // 2. 從 Supabase 刪除
+        if (navigator.onLine && supabaseClient) {
+            try {
+                await supabaseClient
+                    .from('exercises')
+                    .delete()
+                    .eq('id', exId);
+            } catch (e) {
+                console.warn('[Exercise Lib] 雲端刪除失敗');
+            }
+        }
+
+        idInput.value = '';
+        document.getElementById('lib-ex-name').value = '';
+        document.getElementById('lib-ex-url').value = '';
+
+        await loadExerciseLibrary();
+        loadWorkouts();
+    };
+}
+
+async function loadExerciseLibrary() {
+    if (!db) return;
+
+    // A. 讀取 IndexedDB 的 exercises 緩存
+    const localExercises = await new Promise((resolve) => {
+        const transaction = db.transaction(['exercises'], 'readonly');
+        const store = transaction.objectStore('exercises');
+        store.getAll().onsuccess = (e) => resolve(e.target.result);
+    });
+
+    // B. 如果在線且有 Supabase，拉取最新自訂與預設的動作庫
+    if (navigator.onLine && supabaseClient) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('exercises')
+                .select('*');
+            
+            if (!error && data) {
+                // 寫入本地 IndexedDB 快取
+                const transaction = db.transaction(['exercises'], 'readwrite');
+                const store = transaction.objectStore('exercises');
+                data.forEach(ex => store.put(ex));
+                await new Promise(r => transaction.oncomplete = r);
+            }
+        } catch (e) {
+            console.warn('[Exercise Lib] 線上獲取動作庫失敗，採用本地緩存路徑');
+        }
+    }
+
+    // C. 重新讀取本地資料並更新全局變數 exerciseLibrary
+    const allLocal = await new Promise((resolve) => {
+        const transaction = db.transaction(['exercises'], 'readonly');
+        const store = transaction.objectStore('exercises');
+        store.getAll().onsuccess = (e) => resolve(e.target.result);
+    });
+
+    // 重設全局對象，以預設作為底層，疊加自訂動作
+    exerciseLibrary = { ...EXERCISE_MEDIA_DATABASE };
+    allLocal.forEach(ex => {
+        exerciseLibrary[ex.id] = {
+            name: ex.name,
+            mediaUrl: ex.media_url
+        };
+    });
+
+    // D. 重新整理 UI 上的下拉選單
+    populateExerciseSelects();
+    
+    // E. 渲染教練端的動作管理列表
+    renderCoachExerciseList();
+}
+
+function renderCoachExerciseList() {
+    const list = document.getElementById('lib-exercise-list');
+    if (!list) return;
+
+    list.innerHTML = '';
+    Object.entries(exerciseLibrary).forEach(([exId, details]) => {
+        const div = document.createElement('div');
+        div.style = 'padding: 0.35rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.03); cursor:pointer; font-size:0.8rem; display:flex; justify-content:space-between; transition: var(--transition-smooth);';
+        div.innerHTML = `<span><strong>${exId}</strong>: ${details.name}</span>`;
+        
+        div.addEventListener('click', () => {
+            document.getElementById('lib-ex-id').value = exId;
+            document.getElementById('lib-ex-name').value = details.name;
+            document.getElementById('lib-ex-url').value = details.mediaUrl || '';
+            triggerHapticFeedback();
+        });
+        
+        list.appendChild(div);
+    });
 }
 
 // ==========================================
@@ -1534,6 +1728,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // B. 初始化 Supabase 連線
     initSupabase();
+
+    // 載入動作庫範本
+    await loadExerciseLibrary();
 
     // C. 註冊 PWA Service Worker
     if ('serviceWorker' in navigator) {

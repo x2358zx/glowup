@@ -54,17 +54,28 @@ create table public.student_active_logs (
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- 5. 建立「動作庫」資料表
+create table public.exercises (
+    id text primary key,
+    name text not null,
+    media_url text,
+    group_id uuid references public.groups(id) on delete cascade, -- 屬於哪個群組 (NULL代表全域預設動作)
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- 建立索引以提升查詢速度
 create index idx_profiles_group on public.profiles(group_id);
 create index idx_master_workouts_group_date on public.master_workouts(group_id, date);
 create index idx_student_logs_email_date on public.student_active_logs(student_email, date);
 create index idx_student_logs_exercise on public.student_active_logs(exercise_id);
+create index idx_exercises_group on public.exercises(group_id);
 
 -- 啟用 Row Level Security (RLS)
 alter table public.groups enable row level security;
 alter table public.profiles enable row level security;
 alter table public.master_workouts enable row level security;
 alter table public.student_active_logs enable row level security;
+alter table public.exercises enable row level security;
 
 -- ==========================================
 -- 建立 RLS 輔助函數 (避免政策循環引用)
@@ -147,6 +158,19 @@ create policy "僅允許教練編輯與管理主課表" on public.master_workout
 create policy "允許學生讀寫自己的訓練紀錄，以及教練讀寫同群組紀錄" on public.student_active_logs
     for all using (
         student_email = auth.jwt() ->> 'email' or
+        public.is_group_coach(group_id)
+    );
+
+-- 5. Exercises 政策
+create policy "允許同群組成員及教練讀取動作庫" on public.exercises
+    for select using (
+        group_id is null or 
+        group_id = public.get_my_group_id() or
+        public.is_group_coach(group_id)
+    );
+
+create policy "僅允許教練編輯與管理動作庫" on public.exercises
+    for all using (
         public.is_group_coach(group_id)
     );
 
