@@ -51,23 +51,28 @@ let chartInstance = null; // 儲存 1RM Chart.js 實例
 const EXERCISE_MEDIA_DATABASE = {
     'EX_SQUAT_01': {
         name: '後背蹲舉 (Back Squat)',
-        mediaUrl: 'https://vjs.zencdn.net/v/oceans.mp4' // 示範公用影片
+        mediaUrl: 'https://vjs.zencdn.net/v/oceans.mp4', // 示範公用影片
+        category: '腿部'
     },
     'EX_BENCH_01': {
         name: '槓鈴臥推 (Bench Press)',
-        mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
+        mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+        category: '胸部'
     },
     'EX_DEAD_01': {
         name: '硬舉 (Deadlift)',
-        mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4'
+        mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+        category: '腿部'
     },
     'EX_PULLUP_01': {
         name: '引體向上 (Pull-Up)',
-        mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4'
+        mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+        category: '背部'
     },
     'EX_SHOULDER_01': {
         name: '啞鈴肩推 (Dumbbell Shoulder Press)',
-        mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4'
+        mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+        category: '肩部'
     }
 };
 
@@ -641,6 +646,16 @@ async function switchAccount(accountId) {
     localStorage.setItem('glowup_role', currentUser.role);
     localStorage.setItem('glowup_group_id', currentUser.groupId);
 
+    // 清空當前畫面的組件快取 / 狀態以防資料污染
+    activeLogs = [];
+    masterWorkouts = [];
+    
+    const listContainer = document.getElementById('active-workouts-container');
+    if (listContainer) listContainer.innerHTML = '';
+    
+    const claimSection = document.getElementById('claim-workout-section');
+    if (claimSection) claimSection.style.display = 'none';
+
     // 更新設定頁面的 UI 顯示
     renderSettingsPage();
     
@@ -1187,7 +1202,7 @@ function populateExerciseSelects() {
         Object.entries(exerciseLibrary).forEach(([exId, details]) => {
             const option = document.createElement('option');
             option.value = exId;
-            option.textContent = details.name;
+            option.textContent = `[${details.category || '腿部'}] ${details.name}`;
             select.appendChild(option);
         });
     });
@@ -1197,19 +1212,27 @@ async function addOrUpdateLibraryExercise() {
     const idInput = document.getElementById('lib-ex-id');
     const nameInput = document.getElementById('lib-ex-name');
     const urlInput = document.getElementById('lib-ex-url');
+    const categorySelect = document.getElementById('lib-ex-category');
 
-    const exId = idInput.value.trim().toUpperCase();
+    let exId = idInput.value.trim().toUpperCase();
     const exName = nameInput.value.trim();
     const mediaUrl = urlInput.value.trim();
+    const category = categorySelect ? categorySelect.value : '腿部';
 
-    if (!exId || !exName) {
-        alert('請輸入動作代碼 ID 與動作名稱！');
+    if (!exName) {
+        alert('請輸入動作名稱！');
         return;
+    }
+
+    // 如果未輸入動作 ID，則自動產生一個以 EX_ 開頭的唯一 ID
+    if (!exId) {
+        exId = 'EX_' + Date.now().toString(36).toUpperCase();
     }
 
     const newExercise = {
         id: exId,
         name: exName,
+        category: category,
         media_url: mediaUrl || null,
         group_id: currentUser.groupId
     };
@@ -1231,6 +1254,7 @@ async function addOrUpdateLibraryExercise() {
                 showSyncToast('✅ 動作已成功發布至雲端動作庫！');
             } catch (e) {
                 console.error('[Exercise Lib] 無法發布動作至雲端:', e);
+                showSyncToast('⚠ 雲端發布失敗，已保存在本地，連線後自動重試');
             }
         }
 
@@ -1238,6 +1262,7 @@ async function addOrUpdateLibraryExercise() {
         idInput.value = '';
         nameInput.value = '';
         urlInput.value = '';
+        if (categorySelect) categorySelect.value = '腿部';
 
         // 重新加載並渲染
         await loadExerciseLibrary();
@@ -1325,7 +1350,8 @@ async function loadExerciseLibrary() {
     allLocal.forEach(ex => {
         exerciseLibrary[ex.id] = {
             name: ex.name,
-            mediaUrl: ex.media_url
+            mediaUrl: ex.media_url,
+            category: ex.category || '腿部'
         };
     });
 
@@ -1343,13 +1369,29 @@ function renderCoachExerciseList() {
     list.innerHTML = '';
     Object.entries(exerciseLibrary).forEach(([exId, details]) => {
         const div = document.createElement('div');
-        div.style = 'padding: 0.35rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.03); cursor:pointer; font-size:0.8rem; display:flex; justify-content:space-between; transition: var(--transition-smooth);';
-        div.innerHTML = `<span><strong>${exId}</strong>: ${details.name}</span>`;
+        div.style = 'padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.03); cursor:pointer; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center; transition: var(--transition-smooth);';
+        
+        let badgeColor = 'rgba(99, 102, 241, 0.2)';
+        let badgeTextColor = 'var(--primary)';
+        const cat = details.category || '腿部';
+        if (cat === '腿部') { badgeColor = 'rgba(234, 179, 8, 0.2)'; badgeTextColor = 'var(--accent)'; }
+        else if (cat === '胸部') { badgeColor = 'rgba(239, 68, 68, 0.2)'; badgeTextColor = '#f87171'; }
+        else if (cat === '背部') { badgeColor = 'rgba(34, 197, 94, 0.2)'; badgeTextColor = '#4ade80'; }
+        else if (cat === '肩部') { badgeColor = 'rgba(168, 85, 247, 0.2)'; badgeTextColor = '#c084fc'; }
+        else if (cat === '核心') { badgeColor = 'rgba(249, 115, 22, 0.2)'; badgeTextColor = '#fb923c'; }
+        else if (cat === '手臂') { badgeColor = 'rgba(236, 72, 153, 0.2)'; badgeTextColor = '#f472b6'; }
+
+        div.innerHTML = `
+            <span><strong>${exId}</strong>: ${details.name}</span>
+            <span class="badge" style="background:${badgeColor}; color:${badgeTextColor}; font-size:0.7rem; padding:0.15rem 0.4rem; border-radius:0.25rem; font-weight:700;">${cat}</span>
+        `;
         
         div.addEventListener('click', () => {
             document.getElementById('lib-ex-id').value = exId;
             document.getElementById('lib-ex-name').value = details.name;
             document.getElementById('lib-ex-url').value = details.mediaUrl || '';
+            const catSelect = document.getElementById('lib-ex-category');
+            if (catSelect) catSelect.value = cat;
             triggerHapticFeedback();
         });
         
@@ -1506,8 +1548,23 @@ function saveSettings() {
 async function renderWorkoutPage() {
     const listContainer = document.getElementById('active-workouts-container');
     const claimSection = document.getElementById('claim-workout-section');
+    const coachSection = document.getElementById('coach-section');
 
-    // 1. 如果尚未 Claim 領取今日課表
+    // 1. 如果角色是教練，則只顯示教練控制台，隱藏學員的所有紀錄與領取介面
+    if (currentUser.role === 'coach') {
+        if (claimSection) claimSection.style.display = 'none';
+        if (listContainer) listContainer.style.display = 'none';
+        if (coachSection) coachSection.style.display = 'block';
+        
+        // 渲染教練控制台
+        loadCoachConsole();
+        return;
+    }
+
+    // 2. 如果是學生，隱藏教練控制台
+    if (coachSection) coachSection.style.display = 'none';
+
+    // 3. 如果尚未 Claim 領取今日課表
     if (activeLogs.length === 0) {
         listContainer.style.display = 'none';
         claimSection.style.display = 'block';
@@ -1522,7 +1579,7 @@ async function renderWorkoutPage() {
         return;
     }
 
-    // 2. 已領取，顯示訓練卡片
+    // 4. 已領取，顯示訓練卡片
     claimSection.style.display = 'none';
     listContainer.style.display = 'block';
     listContainer.innerHTML = '';

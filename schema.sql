@@ -58,6 +58,7 @@ create table public.student_active_logs (
 create table public.exercises (
     id text primary key,
     name text not null,
+    category text not null default '腿部', -- 肌群分類
     media_url text,
     group_id uuid references public.groups(id) on delete cascade, -- 屬於哪個群組 (NULL代表全域預設動作)
     created_at timestamp with time zone default timezone('utc'::text, now()) not null

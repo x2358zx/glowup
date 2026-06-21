@@ -63,61 +63,74 @@
             </div>
 
             <!-- 教練專用管理面板 (僅當前角色為 coach 時顯示) -->
-            <div id="coach-section" class="card" style="display: none; border-color: rgba(20, 184, 166, 0.3);">
-                <div class="card-title" style="color: var(--secondary);">
-                    <span>🛠 教練課表發布主控台</span>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">選擇動作範本</label>
-                    <select id="coach-exercise-select">
-                        <option value="EX_SQUAT_01">後背蹲舉 (Back Squat)</option>
-                        <option value="EX_BENCH_01">槓鈴臥推 (Bench Press)</option>
-                        <option value="EX_DEAD_01">硬舉 (Deadlift)</option>
-                        <option value="EX_PULLUP_01">引體向上 (Pull-Up)</option>
-                        <option value="EX_SHOULDER_01">啞鈴肩推 (Dumbbell Shoulder Press)</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">目標組數 (Target Sets)</label>
-                    <input type="number" id="coach-sets-input" class="form-input" value="4" min="1" max="10">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">教練提示 / 備註</label>
-                    <input type="text" id="coach-notes-input" class="form-input" placeholder="例如：控制離心速度，注意安全...">
-                </div>
-                <button class="btn btn-accent btn-block" onclick="addMasterWorkout()">＋ 發布至今日主課表</button>
+            <div id="coach-section" style="display: none;">
                 
-                <div style="margin-top: 1.5rem;">
-                    <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-secondary);">今日已發布課表模板：</div>
-                    <div id="coach-master-list"></div>
+                <!-- 卡片 A：課表發布主控台 -->
+                <div class="card" style="border-color: rgba(20, 184, 166, 0.3);">
+                    <div class="card-title" style="color: var(--secondary); margin-bottom: 1.25rem;">
+                        <span>🛠 教練課表發布主控台</span>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">選擇動作範本</label>
+                        <select id="coach-exercise-select" class="form-input">
+                            <!-- 由 JS 動態填充 -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">目標組數 (Target Sets)</label>
+                        <input type="number" id="coach-sets-input" class="form-input" value="4" min="1" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">教練提示 / 備註</label>
+                        <input type="text" id="coach-notes-input" class="form-input" placeholder="例如：控制離心速度，注意安全...">
+                    </div>
+                    <button class="btn btn-accent btn-block" onclick="addMasterWorkout()">＋ 發布至今日主課表</button>
+                    
+                    <div style="margin-top: 1.5rem;">
+                        <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-secondary);">今日已發布課表模板：</div>
+                        <div id="coach-master-list"></div>
+                    </div>
                 </div>
 
-                <!-- 動作庫管理收摺欄 -->
-                <details style="margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-                    <summary style="font-size: 0.85rem; font-weight: 700; color: var(--secondary); cursor: pointer;">📦 管理動作庫範本 (Manage Exercise Library)</summary>
-                    <div style="margin-top: 1rem;">
-                        <div class="form-group">
-                            <label class="form-label">動作代碼 ID (例如: EX_LEGPRESS_01)</label>
-                            <input type="text" id="lib-ex-id" class="form-input" placeholder="EX_LEGPRESS_01">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">動作名稱 (Name)</label>
-                            <input type="text" id="lib-ex-name" class="form-input" placeholder="腿推機">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">示範影片連結 (Media URL)</label>
-                            <input type="text" id="lib-ex-url" class="form-input" placeholder="https://...">
-                        </div>
-                        <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
-                            <button class="btn btn-accent" style="flex:1;" onclick="addOrUpdateLibraryExercise()">儲存 / 更新動作</button>
-                            <button class="btn btn-danger" style="flex:1;" onclick="deleteLibraryExercise()">刪除動作</button>
-                        </div>
-                        <div style="margin-top: 1.5rem;">
-                            <label class="form-label">目前動作庫清單 (點擊可載入編輯)</label>
-                            <div id="lib-exercise-list" style="max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 0.5rem; padding: 0.5rem; border: 1px solid var(--border-color);"></div>
+                <!-- 卡片 B：動作範本管理後台 -->
+                <div class="card" style="border-color: rgba(99, 102, 241, 0.3); margin-top: 1.5rem;">
+                    <div class="card-title" style="color: var(--primary); margin-bottom: 1.25rem;">
+                        <span>🏋️‍♂️ 動作範本管理</span>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">動作代碼 ID (選填，留空將自動生成)</label>
+                        <input type="text" id="lib-ex-id" class="form-input" placeholder="例如: EX_LEGPRESS_01 (英文大寫)">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">動作名稱 (Name) *</label>
+                        <input type="text" id="lib-ex-name" class="form-input" placeholder="例如: 腿推機">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">肌群分類 (Muscle Group Category)</label>
+                        <select id="lib-ex-category" class="form-input">
+                            <option value="胸部">胸部 (Chest)</option>
+                            <option value="背部">背部 (Back)</option>
+                            <option value="腿部">腿部 (Legs)</option>
+                            <option value="肩部">肩部 (Shoulders)</option>
+                            <option value="核心">核心 (Core)</option>
+                            <option value="手臂">手臂 (Arms)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">示範影片/圖片網址 (Media URL)</label>
+                        <input type="text" id="lib-ex-url" class="form-input" placeholder="https://your-media-link.mp4">
+                    </div>
+                    <div style="display:flex; gap:0.5rem; margin-top:1.5rem;">
+                        <button class="btn btn-primary" style="flex:1;" onclick="addOrUpdateLibraryExercise()">儲存 / 更新動作</button>
+                        <button class="btn btn-danger" style="flex:1;" onclick="deleteLibraryExercise()">刪除動作</button>
+                    </div>
+                    <div style="margin-top: 1.5rem;">
+                        <label class="form-label">目前動作範本清單 (點擊可載入編輯)</label>
+                        <div id="lib-exercise-list" style="max-height: 180px; overflow-y: auto; background: rgba(0,0,0,0.25); border-radius: 0.75rem; padding: 0.5rem; border: 1px solid var(--border-color);">
+                            <!-- 由 JS 動態加載 -->
                         </div>
                     </div>
-                </details>
+                </div>
             </div>
 
             <!-- 未 Claim 領取今日課表時顯示的區塊 -->

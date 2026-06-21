@@ -202,7 +202,6 @@ main {
     align-items: center;
 }
 
-/* 按鈕設計 */
 .btn {
     font-family: var(--font-body);
     font-weight: 600;
@@ -216,6 +215,10 @@ main {
     justify-content: center;
     gap: 0.5rem;
     transition: var(--transition-smooth);
+}
+
+.btn:active {
+    transform: scale(0.95); /* 按壓觸覺視覺反饋 */
 }
 
 .btn-primary {
@@ -575,17 +578,17 @@ input:checked + .slider:before {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.25rem;
+    gap: 0.35rem;
 }
 
 .stepper-btn {
-    width: 24px;
-    height: 24px;
-    background: rgba(255, 255, 255, 0.05);
+    width: 32px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.08);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 50%;
     color: var(--text-primary);
-    font-size: 0.85rem;
+    font-size: 1rem;
     font-weight: bold;
     cursor: pointer;
     display: flex;
@@ -595,19 +598,32 @@ input:checked + .slider:before {
 }
 
 .stepper-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.18);
+    border-color: var(--primary);
+}
+
+.stepper-btn:active {
+    transform: scale(0.85); /* 視覺反饋 */
 }
 
 .stepper-input {
-    width: 48px;
-    background: transparent;
-    border: none;
+    width: 56px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
     color: var(--text-primary);
     font-family: var(--font-heading);
     font-weight: 700;
-    font-size: 0.95rem;
+    font-size: 1.05rem;
     text-align: center;
     outline: none;
+    padding: 0.2rem 0;
+    transition: var(--transition-smooth);
+}
+
+.stepper-input:focus {
+    border-color: var(--primary);
+    background: rgba(0, 0, 0, 0.35);
 }
 
 /* 勾選完成框 */
